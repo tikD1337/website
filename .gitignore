@@ -1,0 +1,20 @@
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# локальная конфигурация моделей — ключи не коммитим
+.env
+.env.*
+!.env.example
+config/llm.local.json
+
+# сохранения прогресса, если когда-нибудь начнём выгружать их на диск
+saves/
+
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.log
