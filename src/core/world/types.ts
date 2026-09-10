@@ -40,6 +40,64 @@ export interface Adapter {
   segment: string
 }
 
+export type ServiceStatus = 'running' | 'stopped' | 'paused'
+export type ServiceStartType = 'auto' | 'manual' | 'disabled'
+
+export interface Service {
+  /** короткое имя, как в sc: 'Spooler' */
+  name: string
+  /** отображаемое имя: 'Print Spooler' */
+  displayName: string
+  status: ServiceStatus
+  startType: ServiceStartType
+  /**
+   * Защитная служба. Останов отклоняется шлюзом полномочий — по тому же
+   * правилу, по которому нельзя отключить фаервол. Флаг живёт здесь, а
+   * не в политике, потому что это свойство службы, а не решения.
+   */
+  protected: boolean
+  /** имена служб, без которых эта не запустится */
+  dependsOn: string[]
+}
+
+export type EventLevel = 'information' | 'warning' | 'error' | 'critical'
+export type EventLogName = 'System' | 'Application' | 'Security'
+
+export interface EventEntry {
+  at: string
+  log: EventLogName
+  level: EventLevel
+  source: string
+  eventId: number
+  message: string
+}
+
+export interface DeviceProcess {
+  pid: number
+  name: string
+  /** процент загрузки процессора */
+  cpu: number
+  memMb: number
+}
+
+export interface Driver {
+  device: string
+  provider: string
+  version: string
+  status: 'ok' | 'problem'
+  /** код проблемы диспетчера устройств; null у исправного */
+  problemCode: number | null
+  problemText: string | null
+}
+
+export interface Disk {
+  letter: string
+  label: string
+  totalGb: number
+  freeGb: number
+  health: 'healthy' | 'warning' | 'failing'
+}
+
 export interface Device {
   hostname: string
   assetTag: string
@@ -48,6 +106,12 @@ export interface Device {
   /** samAccountName владельца */
   assignedTo: string
   adapters: Adapter[]
+  services: Service[]
+  processes: DeviceProcess[]
+  /** отсортирован по времени, старые записи первыми */
+  eventLog: EventEntry[]
+  drivers: Driver[]
+  disks: Disk[]
 }
 
 export interface NetworkSegment {
