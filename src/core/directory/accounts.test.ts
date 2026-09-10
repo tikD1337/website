@@ -19,7 +19,15 @@ beforeEach(() => {
 })
 
 const user = (sam = 'p.raman') => findUser(world, sam)!
-const verified = () => setFlag(session, 'identityVerified', true)
+/**
+ * Сверка относится к конкретной учётной записи, поэтому в тестах
+ * недостаточно поднять флаг — нужно сказать, кого сверяли.
+ */
+const verifiedFor = (sam = 'p.raman') => {
+  setFlag(session, 'identityVerified', true)
+  session.verifiedAccount = sam
+}
+const verified = () => verifiedFor('p.raman')
 
 describe('unlockAccount', () => {
   beforeEach(() => {
@@ -122,6 +130,21 @@ describe('сброс пароля с подтверждением личност
   })
 })
 
+describe('сверили не того человека', () => {
+  it('изменение чужого аккаунта всё равно помечается', () => {
+    verifiedFor('p.raman')
+    const r = resetPassword(world, 's.okafor', session, clock)
+    expect(r.ok).toBe(true)
+    expect(r.flagged).toBe(true)
+  })
+
+  it('причина объясняет, что сверяли другого', () => {
+    verifiedFor('p.raman')
+    resetPassword(world, 's.okafor', session, clock)
+    expect(session.flags.dangerousActions[0]!.reason).toContain('другого')
+  })
+})
+
 describe('setEnabled', () => {
   beforeEach(verified)
 
@@ -139,7 +162,7 @@ describe('setEnabled', () => {
 })
 
 describe('addToGroup', () => {
-  beforeEach(verified)
+  beforeEach(() => verifiedFor('e.varga'))
 
   it('добавляет и согласованно меняет обе стороны', () => {
     const r = addToGroup(world, 'e.varga', 'GRP-Sales-Contracts', session, clock)
@@ -163,6 +186,7 @@ describe('addToGroup', () => {
     сброса пароля.
   */
   it('добавление в привилегированную группу отклоняется', () => {
+    verifiedFor('p.raman')
     const r = addToGroup(world, 'p.raman', 'Domain Admins', session, clock)
     expect(r.ok).toBe(false)
     expect(r.error).toContain('привилегированная')
@@ -170,23 +194,25 @@ describe('addToGroup', () => {
   })
 
   it('отклонение пишется как опасное действие', () => {
+    verifiedFor('p.raman')
     addToGroup(world, 'p.raman', 'Domain Admins', session, clock)
     expect(session.flags.dangerousActions).toHaveLength(1)
   })
 
   it('отказ действует и с подтверждённой личностью', () => {
-    verified()
+    verifiedFor('p.raman')
     expect(addToGroup(world, 'p.raman', 'GRP-Helpdesk-T1', session, clock).ok).toBe(false)
   })
 
   it('несуществующая группа даёт внятную ошибку', () => {
+    verifiedFor('p.raman')
     const r = addToGroup(world, 'p.raman', 'GRP-Нет', session, clock)
     expect(r.error).toContain('группа')
   })
 })
 
 describe('removeFromGroup', () => {
-  beforeEach(verified)
+  beforeEach(() => verifiedFor('p.raman'))
 
   it('исключает и согласованно меняет обе стороны', () => {
     removeFromGroup(world, 'p.raman', 'GRP-Sales-Contracts', session, clock)
@@ -195,6 +221,7 @@ describe('removeFromGroup', () => {
   })
 
   it('исключение из группы, где не состоит, изменением не считается', () => {
+    verifiedFor('e.varga')
     const r = removeFromGroup(world, 'e.varga', 'GRP-Finance-Reports', session, clock)
     expect(r.alreadyInState).toBe(true)
   })
@@ -212,7 +239,7 @@ describe('hasShareAccess', () => {
   })
 
   it('добавление в группу открывает доступ', () => {
-    setFlag(session, 'identityVerified', true)
+    verifiedFor('p.raman')
     const share = world.org.shares.find(s => s.requiresGroup === 'GRP-Finance-Reports')!
     addToGroup(world, 'p.raman', 'GRP-Finance-Reports', session, clock)
     expect(hasShareAccess(world, 'p.raman', share.path)).toBe(true)

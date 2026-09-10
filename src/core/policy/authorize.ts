@@ -2,6 +2,17 @@ import type { WorldState } from '../world/types'
 import type { SessionLog } from '../session/types'
 
 /**
+ * Подтверждена ли личность владельца именно этой учётной записи.
+ *
+ * Дублирует `directory/identity.ts`, чтобы политика не зависела от
+ * каталога: шлюз обязан оставаться самым нижним слоем.
+ */
+function isVerifiedFor(session: SessionLog, sam: string): boolean {
+  return session.flags.identityVerified
+    && session.verifiedAccount?.toLowerCase() === sam.toLowerCase()
+}
+
+/**
  * Шлюз полномочий.
  *
  * Единственная точка, через которую проходит любое изменение мира —
@@ -75,11 +86,14 @@ export function authorize(
         их просто не показывают. Поэтому действие проходит, помечается
         несанкционированным и стоит балла в оценке.
       */
-      if (!session.flags.identityVerified) {
+      if (!isVerifiedFor(session, action.target)) {
         return {
           decision: 'flag',
-          reason: 'личность обратившегося не подтверждена — '
-            + 'изменение аккаунта без сверки является инцидентом безопасности',
+          reason: session.flags.identityVerified
+            ? 'сверяли другого человека — подтверждение относится к '
+              + 'конкретной учётной записи, а не даёт права менять любые'
+            : 'личность обратившегося не подтверждена — изменение '
+              + 'аккаунта без сверки является инцидентом безопасности',
         }
       }
       return { decision: 'allow', reason: '' }

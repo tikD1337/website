@@ -61,6 +61,14 @@ export interface SessionFlags {
 }
 
 export interface SessionLog {
+  /**
+   * Чья личность подтверждена.
+   *
+   * Флаг `identityVerified` отвечает «была ли сверка вообще», а это
+   * поле — «кого сверяли». Второе строже: подтвердив одного
+   * обратившегося, техник не получает права менять чужие аккаунты.
+   */
+  verifiedAccount?: string
   commands: CommandEntry[]
   changes: ChangeEntry[]
   dialogue: DialogueEntry[]

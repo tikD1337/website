@@ -56,8 +56,9 @@ describe('authorize — изменение учётной записи', () => {
     expect(security.decision).toBe('deny')
   })
 
-  it('разрешено после проверки личности', () => {
+  it('разрешено после проверки личности того же человека', () => {
     setFlag(ctx.session, 'identityVerified', true)
+    ctx.session.verifiedAccount = 'p.raman'
     const r = authorize(
       { kind: 'account-change', target: 'p.raman', description: 'сброс пароля' },
       ctx.world, ctx.session)
