@@ -37,7 +37,7 @@ describe('setPath', () => {
   it('записывает значение по вложенному пути', () => {
     const root = { devices: { 'AL-LPT-0447': { adapters: [{ ip: '169.254.23.11' }] } } }
     setPath(root, 'devices.AL-LPT-0447.adapters[0].ip', '10.20.14.88')
-    expect(root.devices['AL-LPT-0447'].adapters[0].ip).toBe('10.20.14.88')
+    expect(root.devices['AL-LPT-0447']!.adapters[0]!.ip).toBe('10.20.14.88')
   })
 
   it('бросает исключение, если промежуточный сегмент отсутствует', () => {
