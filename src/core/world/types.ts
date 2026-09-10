@@ -133,6 +133,37 @@ export interface DnsServer {
   zones: Record<string, string>
 }
 
+export interface OrganizationalUnit {
+  /** различающееся имя: 'OU=Sales,OU=Employees,OU=Corp' */
+  path: string
+  name: string
+  /** путь родителя; null у корня */
+  parent: string | null
+}
+
+export interface DirectoryGroup {
+  name: string
+  displayName: string
+  ou: string
+  description: string
+  /** samAccountName участников */
+  members: string[]
+  /** пути общих ресурсов, к которым группа даёт доступ */
+  grantsAccessTo: string[]
+  /**
+   * Привилегированная группа. Добавление в неё отклоняется шлюзом:
+   * первая линия не выдаёт административных прав.
+   */
+  protected: boolean
+}
+
+export interface FileShare {
+  path: string
+  description: string
+  /** имя группы, членство в которой открывает доступ */
+  requiresGroup: string
+}
+
 export interface OrgUser {
   samAccountName: string
   displayName: string
@@ -141,11 +172,37 @@ export interface OrgUser {
   email: string
   phone: string
   primaryDevice: string
+  /** путь OU, в которой лежит учётная запись */
+  ou: string
+  /** руководитель — контрольное поле для сверки личности */
+  manager: string
+  /** кабинет — второе контрольное поле */
+  office: string
+  enabled: boolean
+  lockedOut: boolean
+  /**
+   * Что именно блокирует учётную запись.
+   *
+   * Заполнено, когда блокировки повторяются: устройство с устаревшими
+   * учётными данными. Разблокировка без устранения источника вернёт
+   * проблему через несколько минут — это и есть тихая поломка.
+   */
+  lockoutSource: string | null
+  pwdExpired: boolean
+  pwdLastSet: string
+  badPwdCount: number
+  /** имена групп; согласовано с DirectoryGroup.members */
+  groups: string[]
 }
 
 export interface WorldState {
   org: {
+    /** различающееся имя домена: 'DC=arcline,DC=corp' */
+    domain: string
+    ous: OrganizationalUnit[]
+    groups: DirectoryGroup[]
     users: OrgUser[]
+    shares: FileShare[]
   }
   /** ключ — имя хоста */
   devices: Record<string, Device>

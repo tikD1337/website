@@ -1,4 +1,5 @@
 import { BRAND } from '../../brand'
+import { DOMAIN, seedOus, seedGroups, seedUsers, seedShares } from './seed-directory'
 import type {
   WorldState, Service, EventEntry, DeviceProcess, Driver, Disk, Adapter,
 } from './types'
@@ -240,26 +241,11 @@ function ethernet(mac: string, ip: string): Adapter {
 export function seedWorld(): WorldState {
   return {
     org: {
-      users: [
-        {
-          samAccountName: 'p.raman',
-          displayName: 'Priya Raman',
-          dept: 'Продажи',
-          title: 'менеджер по работе с клиентами',
-          email: `priya.raman@${BRAND.domain}`,
-          phone: '+1 (512) 555-0148',
-          primaryDevice: 'AL-LPT-0447',
-        },
-        {
-          samAccountName: 's.okafor',
-          displayName: 'Sam Okafor',
-          dept: 'Финансы',
-          title: 'финансовый аналитик',
-          email: `sam.okafor@${BRAND.domain}`,
-          phone: '+1 (512) 555-0152',
-          primaryDevice: 'AL-DSK-0192',
-        },
-      ],
+      domain: DOMAIN,
+      ous: seedOus(),
+      groups: seedGroups(),
+      users: seedUsers(),
+      shares: seedShares(),
     },
 
     devices: {
@@ -275,6 +261,34 @@ export function seedWorld(): WorldState {
         eventLog: baseEventLog(),
         drivers: baseDrivers('Torvald'),
         disks: baseDisks(476, 212),
+      },
+
+      'AL-LPT-0512': {
+        hostname: 'AL-LPT-0512',
+        assetTag: 'AL-L0512',
+        vendor: 'Torvald',
+        model: 'WorkLine X1 Gen 12',
+        assignedTo: 'e.varga',
+        adapters: [ethernet('C6-2A-9F-11-58-D3', '10.20.14.89')],
+        services: baseServices(),
+        processes: baseProcesses(),
+        eventLog: baseEventLog(),
+        drivers: baseDrivers('Torvald'),
+        disks: baseDisks(476, 301),
+      },
+
+      'AL-LPT-0601': {
+        hostname: 'AL-LPT-0601',
+        assetTag: 'AL-L0601',
+        vendor: 'Kestrel',
+        model: 'Meridian 5450',
+        assignedTo: 'd.mbeki',
+        adapters: [ethernet('D8-4F-1C-63-20-7A', '10.20.14.90')],
+        services: baseServices(),
+        processes: baseProcesses(),
+        eventLog: baseEventLog(),
+        drivers: baseDrivers('Kestrel'),
+        disks: baseDisks(476, 388),
       },
 
       'AL-DSK-0192': {
@@ -300,7 +314,12 @@ export function seedWorld(): WorldState {
           gateway: '10.20.14.1',
           dhcpServer: '10.20.14.5',
           dhcpHealthy: true,
-          leasePool: ['10.20.14.88', '10.20.14.89', '10.20.14.90'],
+          // Пул шире числа машин: иначе renew на второй машине выдал бы
+          // адрес, уже занятый первой, и получился бы конфликт из ничего.
+          leasePool: [
+            '10.20.14.88', '10.20.14.89', '10.20.14.90', '10.20.14.91',
+            '10.20.14.92', '10.20.14.93',
+          ],
           dns: ['10.20.14.10', '10.20.14.11'],
         },
       ],
