@@ -22,11 +22,29 @@ const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
 /** Значения, реально фигурировавшие в изменениях мира. */
 function changedValues(session: SessionLog): string[] {
   const out: string[] = []
+
   for (const c of session.changes) {
+    // Значения: адреса, состояния служб, типы запуска.
     for (const v of [c.before, c.after]) {
-      if (typeof v === 'string' && v.length > 3) out.push(v.toLowerCase())
+      if (typeof v === 'string' && v.length >= 3) out.push(v.toLowerCase())
+    }
+
+    /*
+      Имя объекта из пути изменения.
+
+      «devices.AL-DSK-0192.services.Spooler.status» — упоминание Spooler
+      в заметке так же конкретно, как упоминание адреса в сетевом
+      сценарии. Без этого грейдер требовал бы от техника цитировать
+      служебные строки вроде «running», что заметку только испортит.
+    */
+    const parts = c.path.split('.')
+    for (const p of parts.slice(2)) {
+      if (p.length >= 3 && !['services', 'adapters', 'status'].includes(p)) {
+        out.push(p.toLowerCase())
+      }
     }
   }
+
   return [...new Set(out)]
 }
 
@@ -76,13 +94,36 @@ export function gradeNote(
   //    в журнале, названы минимум две реально выполненные команды, и в
   //    тексте есть явный признак отрицательного результата.
   const namedCommands = ran.filter(c => n.includes(c))
+
+  /*
+    Работа мышью — такая же проверка, как команда.
+
+    Грейдер изначально знал только про терминал, и заметка о разборе
+    через окна теряла балл ни за что. Названные инструменты и объекты
+    засчитываются наравне с командами.
+  */
+  const GUI_EVIDENCE = [
+    'журнал событий', 'просмотр событий', 'журнале событий',
+    'окно служб', 'окне служб', 'диспетчер устройств', 'диспетчере устройств',
+    'тип запуска', 'типа запуска', 'состояние службы',
+  ]
+  const namedGui = GUI_EVIDENCE.filter(g => n.includes(g))
+  const evidenceCount = namedCommands.length + namedGui.length
+
   const hadFruitless = fruitless.length > 0
   const NEGATIVE_MARKERS = [
     'ошибк', 'не прошёл', 'не прошел', 'не сработал', 'не помог',
     'исключ', 'ничего не', 'не дал', 'таймаут', 'безрезультат', 'отброс',
   ]
   const mentionsNegative = NEGATIVE_MARKERS.some(m => n.includes(m))
-  const checksEarned = hadFruitless && namedCommands.length >= 2 && mentionsNegative
+  /*
+    Отрицательный результат обязателен только там, где он был.
+
+    В сетевом сценарии renew падает, и умолчать об этом — потеря. В
+    сценарии со службой падений нет: требовать «скажите, что не
+    сработало» значило бы требовать выдумки.
+  */
+  const checksEarned = evidenceCount >= 2 && (!hadFruitless || mentionsNegative)
 
   // 3. Конкретное изменение: названо значение из журнала изменений.
   const changeEarned = values.some(v => n.includes(v))
@@ -94,8 +135,10 @@ export function gradeNote(
   const verificationEarned = confirmed && mentionsConfirm
 
   // 5. Что нужно следующему технику.
-  const handoffEarned = ['причин', 'при повторении', 'повторится', 'следующ',
-    'эскал', 'сетев'].some(t => n.includes(t))
+  const handoffEarned = [
+    'причин', 'при повторении', 'повторится', 'следующ', 'эскал',
+    'сетев', 'второй линии', 'вторую линию', 'драйвер', 'заменён', 'заменен',
+  ].some(t => n.includes(t))
 
   const parts: NotePart[] = [
     {
@@ -112,10 +155,9 @@ export function gradeNote(
       label: 'Проверки и что они исключили',
       earned: checksEarned,
       explain: checksEarned
-        ? `Названы выполненные проверки (${namedCommands.length}), и сказано, `
-          + 'какая из них ничего не дала.'
-        : namedCommands.length < 2
-          ? 'Нужно назвать минимум две реально выполненные команды.'
+        ? `Названы выполненные проверки (${evidenceCount}).`
+        : evidenceCount < 2
+          ? 'Нужно назвать минимум две проверки — команды или то, что смотрели в окнах.'
           : 'Не сказано, что какая-то из проверок ничего не дала. Именно это '
             + 'показывает, что версия была отброшена, а не забыта.',
     },

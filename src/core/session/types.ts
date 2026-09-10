@@ -50,6 +50,13 @@ export interface SessionFlags {
   userConfirmed: boolean
   /** техник проговорил действие до его выполнения */
   announcedBeforeActing: boolean
+  /**
+   * Техник открывал просмотр событий.
+   *
+   * Нужен, чтобы отличить «запустил службу» от «разобрался, почему она
+   * упала». Первое чинит на сегодня, второе — по-настоящему.
+   */
+  eventLogRead: boolean
   dangerousActions: DangerousAction[]
 }
 

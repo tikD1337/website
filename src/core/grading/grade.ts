@@ -3,6 +3,7 @@ import type { NoteScore } from './types'
 import type { SessionLog } from '../session/types'
 import type { Ticket } from '../tickets/types'
 import type { Scenario, Objective } from '../scenario/types'
+import { getPath } from '../world/path'
 import type { WorldState } from '../world/types'
 
 /**
@@ -74,8 +75,20 @@ function objectiveMet(o: Objective, session: SessionLog, ticket: Ticket): boolea
  * заявитель доволен, тикет закрыт — а мина заложена. В оригинале это
  * отдельная метрика, и не зря.
  */
-function detectSilentFaults(world: WorldState, ticket: Ticket): string[] {
+function detectSilentFaults(
+  world: WorldState, ticket: Ticket, scenario: Scenario,
+): string[] {
   const out: string[] = []
+
+  // Ловушки, объявленные сценарием: «починил, но оставил след».
+  for (const check of scenario.silentFaultChecks ?? []) {
+    const value = getPath(world, check.path)
+    const hit =
+      ('equals' in check && value === check.equals)
+      || ('notEquals' in check && value !== check.notEquals)
+    if (hit) out.push(check.message)
+  }
+
   const a = world.devices[ticket.device]?.adapters[0]
   if (!a) return out
 
@@ -108,7 +121,7 @@ export function gradeIncident(args: GradeArgs): Scorecard {
   }))
 
   const note = gradeNote(ticket.resolutionNotes, session, ticket, scenario)
-  const silentFaults = detectSilentFaults(world, ticket)
+  const silentFaults = detectSilentFaults(world, ticket, scenario)
 
   const dangerous = session.flags.dangerousActions.length
   const codeRight = ticket.resolutionCode === scenario.expectedResolution

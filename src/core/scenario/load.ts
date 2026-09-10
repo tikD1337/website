@@ -15,11 +15,33 @@ export function incidentNumber(id: string): string {
   return 'INC' + String(h % 10_000_000).padStart(7, '0')
 }
 
+function makeTicket(s: Scenario): Ticket {
+  return buildTicket(s)
+}
+
+/**
+ * Загружает несколько сценариев в один мир.
+ *
+ * Сценарии ломают разные машины, поэтому их инъекции складываются без
+ * конфликтов. Если два сценария однажды тронут одно поле, победит
+ * последний — и это будет видно в тестах сценариев, а не всплывёт
+ * загадочным поведением.
+ */
+export function loadScenarios(list: Scenario[]): { world: WorldState; tickets: Ticket[] } {
+  const world = createWorld()
+  for (const s of list) applyInject(world, s.inject)
+  return { world, tickets: list.map(makeTicket) }
+}
+
 export function loadScenario(s: Scenario): { world: WorldState; ticket: Ticket } {
   const world = createWorld()
   applyInject(world, s.inject)
 
-  const ticket: Ticket = {
+  return { world, ticket: buildTicket(s) }
+}
+
+function buildTicket(s: Scenario): Ticket {
+  return {
     number: incidentNumber(s.id),
     scenarioId: s.id,
     summary: s.summary,
@@ -40,6 +62,4 @@ export function loadScenario(s: Scenario): { world: WorldState; ticket: Ticket }
     slaResolveHours: s.slaResolveHours,
     communications: [],
   }
-
-  return { world, ticket }
 }

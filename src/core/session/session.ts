@@ -13,6 +13,7 @@ export function createSession(): SessionLog {
       scopeChecked: false,
       userConfirmed: false,
       announcedBeforeActing: false,
+      eventLogRead: false,
       dangerousActions: [],
     },
   }

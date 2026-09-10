@@ -450,15 +450,22 @@ textarea::placeholder { color: var(--faint); }
   user-select: none;
 }
 
+/*
+  Иконки переносятся в следующую колонку, как на настоящем столе.
+  Сетка с автозаполнением по строкам делает это без расчёта высоты,
+  который у flex-column-wrap обязателен и ломается при изменении
+  размера области.
+*/
 .desktop-icons {
   position: absolute;
-  inset: 8px auto 52px 8px;
-  display: flex;
-  flex-direction: column;
-  flex-wrap: wrap;
-  align-content: flex-start;
+  inset: 8px 8px 52px 8px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(auto-fill, 72px);
+  grid-auto-columns: 84px;
+  justify-content: start;
+  align-content: start;
   gap: 2px;
-  max-height: calc(100% - 60px);
 }
 
 .desk-icon {

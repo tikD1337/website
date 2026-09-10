@@ -1,5 +1,6 @@
 import { useGame } from '../store/useGame'
 import { withPlural } from './plural'
+import { scenarioFor } from '../scenarios'
 import type { Scorecard } from '../core/grading/grade'
 
 const VERDICT: Record<Scorecard['verdict'], string> = {
@@ -14,7 +15,7 @@ function mark(score: number): string {
 
 export function ScorecardView() {
   const card = useGame(s => s.scorecard)
-  const scenario = useGame(s => s.scenario)
+  const scoredId = useGame(s => s.scoredScenarioId)
   const reset = useGame(s => s.reset)
 
   if (!card) {
@@ -92,7 +93,7 @@ export function ScorecardView() {
 
       <div className="section">
         <h2>Что это было на самом деле</h2>
-        <p className="prose">{scenario.rootCause}</p>
+        <p className="prose">{scoredId ? scenarioFor(scoredId).rootCause : ''}</p>
       </div>
 
       <div className="bar">

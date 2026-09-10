@@ -205,5 +205,16 @@ export const apipaNoLease: Scenario = {
     ],
   },
 
+  fixedWhen: [
+    { path: 'devices.AL-LPT-0447.adapters[0].autoconfigured', equals: false, message: '' },
+    { path: 'devices.AL-LPT-0447.adapters[0].gateway', notEquals: '', message: '' },
+    { path: 'devices.AL-LPT-0447.adapters[0].linkUp', equals: true, message: '' },
+  ],
+
+  confirmReplies: [
+    'Сейчас проверю… да, открылось! Спасибо большое.',
+    'Нет, у меня всё так же — страница не грузится.',
+  ],
+
   expectedResolution: 'solved',
 }

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import {
   createWindows, openWindow, closeWindow, focusWindow, moveWindow,
   minimizeWindow, restoreWindow, toggleMaximize, isOpen, topmost, visibleWindows,
+  setViewport,
 } from './windows'
 import type { WindowsState } from './windows'
 
@@ -179,5 +180,62 @@ describe('перемещение', () => {
     const before = w.windows.find(x => x.id === 'cmd')!.x
     moveWindow(w, 'cmd', 400, 400)
     expect(w.windows.find(x => x.id === 'cmd')!.x).toBe(before)
+  })
+})
+
+describe('подгонка под размер рабочего стола', () => {
+  it('окно не шире доступного места', () => {
+    const s = createWindows()
+    setViewport(s, 719, 1069)
+    openWindow(s, 'services')          // по умолчанию 820 в ширину
+    const win = s.windows[0]!
+    expect(win.w).toBeLessThanOrEqual(719)
+    expect(win.x + win.w).toBeLessThanOrEqual(719)
+  })
+
+  it('окно не заезжает под панель задач', () => {
+    const s = createWindows()
+    setViewport(s, 1200, 400)
+    openWindow(s, 'eventvwr')          // по умолчанию 520 в высоту
+    const win = s.windows[0]!
+    expect(win.y + win.h).toBeLessThanOrEqual(400 - 44)
+  })
+
+  it('уже открытые окна сжимаются, когда стол уменьшился', () => {
+    const s = createWindows()
+    setViewport(s, 1200, 800)
+    openWindow(s, 'services')
+    setViewport(s, 600, 500)
+    const win = s.windows[0]!
+    expect(win.w).toBeLessThanOrEqual(600)
+    expect(win.x).toBeLessThan(600)
+  })
+
+  it('перетаскивание не даёт увести окно за правый край', () => {
+    const s = createWindows()
+    setViewport(s, 800, 600)
+    openWindow(s, 'cmd')
+    moveWindow(s, 'cmd', 5000, 5000)
+    const win = s.windows[0]!
+    expect(win.x).toBeLessThan(800)
+    expect(win.y).toBeLessThan(600)
+  })
+
+  it('заголовок остаётся достижимым при уводе влево', () => {
+    const s = createWindows()
+    setViewport(s, 800, 600)
+    openWindow(s, 'cmd')
+    moveWindow(s, 'cmd', -5000, 0)
+    const win = s.windows[0]!
+    expect(win.x + win.w).toBeGreaterThanOrEqual(80)
+  })
+
+  it('очень узкий стол не даёт отрицательных размеров', () => {
+    const s = createWindows()
+    setViewport(s, 320, 240)
+    openWindow(s, 'browser')
+    const win = s.windows[0]!
+    expect(win.w).toBeGreaterThan(0)
+    expect(win.h).toBeGreaterThan(0)
   })
 })

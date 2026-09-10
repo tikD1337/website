@@ -42,6 +42,24 @@ export interface Persona {
   scripted: ScriptedExchange[]
 }
 
+/**
+ * Проверка на тихую поломку, специфичная для сценария.
+ *
+ * Универсальные проверки (адаптер остался на самоназначенном адресе,
+ * DHCP отключён вручную) живут в оценке. А вот «служба запущена, но
+ * тип запуска остался „отключено“» — свойство конкретной поломки, и
+ * объявлять её должен сценарий.
+ *
+ * Проверка срабатывает, когда значение по пути совпало с `equals`
+ * либо разошлось с `notEquals`.
+ */
+export interface SilentFaultCheck {
+  path: string
+  equals?: unknown
+  notEquals?: unknown
+  message: string
+}
+
 export interface Scenario {
   id: string
   category: string
@@ -62,6 +80,18 @@ export interface Scenario {
   objectives: Objective[]
   actionsToAvoid: string[]
   persona: Persona
+  /** ловушки, оставленные самим техником */
+  silentFaultChecks?: SilentFaultCheck[]
+  /**
+   * Условие, по которому заявитель поймёт, что проблема ушла.
+   *
+   * Заявитель судит по своей проблеме, а не по состоянию мира вообще:
+   * при неполадке с печатью его не волнует сетевой адаптер. Все условия
+   * должны выполниться, иначе он скажет, что всё по-прежнему.
+   */
+  fixedWhen: SilentFaultCheck[]
+  /** что заявитель скажет: [когда заработало, когда нет] */
+  confirmReplies: [string, string]
 
   expectedResolution: 'solved' | 'escalate' | 'not-reproducible' | 'cancelled'
 }

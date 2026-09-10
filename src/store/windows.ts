@@ -56,6 +56,14 @@ export interface WindowsState {
   nextZ: number
   /** сколько окон уже открывалось — для каскада */
   opened: number
+  /**
+   * Размер рабочего стола в пикселях.
+   *
+   * Окна подгоняются под него, а не под константы из APPS: иначе
+   * окно шириной 820 вылезет за край области в 719 — это и случилось
+   * при первой визуальной проверке.
+   */
+  viewport: { w: number; h: number }
 }
 
 const CASCADE_STEP = 28
@@ -63,8 +71,39 @@ const CASCADE_ORIGIN = { x: 40, y: 24 }
 const CASCADE_WRAP = 6
 
 export function createWindows(): WindowsState {
-  return { windows: [], nextZ: 1, opened: 0 }
+  return { windows: [], nextZ: 1, opened: 0, viewport: { w: 1024, h: 640 } }
 }
+
+/** Рабочий стол сообщает свой размер: от него зависят размеры окон. */
+export function setViewport(s: WindowsState, w: number, h: number): void {
+  s.viewport = { w: Math.max(320, w), h: Math.max(240, h) }
+
+  // Уже открытые окна возвращаются в границы.
+  for (const win of s.windows) {
+    win.w = Math.min(win.w, s.viewport.w - 16)
+    win.h = Math.min(win.h, s.viewport.h - TASKBAR - 16)
+    clampInto(s, win)
+  }
+}
+
+/** Высота панели задач — окна не должны под неё заезжать. */
+const TASKBAR = 44
+
+/**
+ * Возвращает окно в пределы рабочего стола.
+ *
+ * Полностью запирать окно внутри нельзя — тогда его не подвинуть к
+ * краю. Но заголовок должен остаться доступным, иначе окно потеряно.
+ */
+function clampInto(s: WindowsState, win: WindowState): void {
+  const maxX = s.viewport.w - MIN_VISIBLE
+  const maxY = s.viewport.h - TASKBAR - BAR_HEIGHT
+  win.x = Math.min(Math.max(-win.w + MIN_VISIBLE, win.x), maxX)
+  win.y = Math.min(Math.max(0, win.y), Math.max(0, maxY))
+}
+
+const MIN_VISIBLE = 80
+const BAR_HEIGHT = 30
 
 function find(s: WindowsState, id: AppId): WindowState | undefined {
   return s.windows.find(x => x.id === id)
@@ -103,13 +142,26 @@ export function openWindow(s: WindowsState, id: AppId): void {
   const meta = APPS[id]
   const step = s.opened % CASCADE_WRAP
 
+  // Окно не больше доступного места, с запасом на каскад и панель задач.
+  const w = Math.min(meta.w, s.viewport.w - 2 * CASCADE_ORIGIN.x)
+  const h = Math.min(meta.h, s.viewport.h - TASKBAR - 2 * CASCADE_ORIGIN.y)
+
+  const x = Math.min(
+    CASCADE_ORIGIN.x + step * CASCADE_STEP,
+    Math.max(0, s.viewport.w - w - 8),
+  )
+  const y = Math.min(
+    CASCADE_ORIGIN.y + step * CASCADE_STEP,
+    Math.max(0, s.viewport.h - TASKBAR - h - 8),
+  )
+
   s.windows.push({
     id,
     title: meta.title,
-    x: CASCADE_ORIGIN.x + step * CASCADE_STEP,
-    y: CASCADE_ORIGIN.y + step * CASCADE_STEP,
-    w: meta.w,
-    h: meta.h,
+    x,
+    y,
+    w,
+    h,
     z: s.nextZ,
     minimized: false,
     maximized: false,
@@ -170,7 +222,7 @@ export function moveWindow(s: WindowsState, id: AppId, x: number, y: number): vo
   const win = find(s, id)
   if (!win || win.maximized) return
 
-  const minVisible = 80
-  win.x = Math.max(-win.w + minVisible, x)
-  win.y = Math.max(0, y)
+  win.x = x
+  win.y = y
+  clampInto(s, win)
 }

@@ -1,6 +1,7 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand'
-import { loadScenario } from '../core/scenario/load'
-import { apipaNoLease } from '../scenarios/net-apipa-no-lease'
+import { loadScenarios } from '../core/scenario/load'
+import { SCENARIOS, scenarioFor } from '../scenarios'
+import { getPath } from '../core/world/path'
 import { createQueue, claim, setStatus, resolve, findTicket } from '../core/tickets/queue'
 import { createSession, setFlag, recordDialogue } from '../core/session/session'
 import { createRegistry } from '../core/terminal/registry'
@@ -16,7 +17,8 @@ import {
 import { BRAND } from '../brand'
 import {
   createWindows, openWindow, closeWindow, focusWindow, minimizeWindow,
-  restoreWindow, toggleMaximize, moveWindow, type WindowsState, type AppId,
+  restoreWindow, toggleMaximize, moveWindow, setViewport,
+  type WindowsState, type AppId,
 } from './windows'
 import type { Clock, WorldState } from '../core/world/types'
 import type { SessionLog } from '../core/session/types'
@@ -36,10 +38,12 @@ export interface GameState {
   world: WorldState
   queue: QueueState
   session: SessionLog
-  scenario: Scenario
+  scenarios: Scenario[]
   activeTool: Tool
   terminalLines: TerminalLine[]
   scorecard: Scorecard | null
+  /** сценарий закрытого тикета — разбор показывает его корневую причину */
+  scoredScenarioId: string | null
   windows: WindowsState
   /** время симуляции — часы трея берут его отсюда, а не из Date.now() */
   now: Date
@@ -63,6 +67,7 @@ export interface GameState {
   restoreApp(id: AppId): void
   maximizeApp(id: AppId): void
   dragApp(id: AppId, x: number, y: number): void
+  setDesktopSize(w: number, h: number): void
 
   clearTerminal(): void
   startServiceOn(name: string): OpResult
@@ -85,15 +90,16 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
   registry.register('sc', sc)
 
   const fresh = () => {
-    const { world, ticket } = loadScenario(apipaNoLease)
+    const { world, tickets } = loadScenarios(SCENARIOS)
     return {
       world,
-      queue: createQueue([ticket]),
+      queue: createQueue(tickets),
       session: createSession(),
-      scenario: apipaNoLease,
+      scenarios: SCENARIOS,
       activeTool: 'queue' as Tool,
       terminalLines: banner(),
       scorecard: null,
+      scoredScenarioId: null,
       windows: createWindows(),
       now: clock.now(),
     }
@@ -201,12 +207,18 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
       if (!assigned) return
 
       const ticket = findTicket(st.queue, assigned)
-      const a = st.world.devices[ticket.device]?.adapters[0]
-      const worksNow = Boolean(a && !a.autoconfigured && a.gateway !== '' && a.linkUp)
+      const scenario = scenarioFor(ticket.scenarioId)
 
-      const reply = worksNow
-        ? 'Сейчас проверю… да, открылось! Спасибо большое.'
-        : 'Нет, у меня всё так же — страница не грузится.'
+      // Заявитель судит по своей проблеме: условия задаёт сценарий.
+      const worksNow = scenario.fixedWhen.every(check => {
+        const value = getPath(st.world, check.path)
+        if ('equals' in check) return value === check.equals
+        if ('notEquals' in check) return value !== check.notEquals
+        return false
+      })
+
+      const [good, bad] = scenario.confirmReplies
+      const reply = worksNow ? good! : bad!
 
       recordDialogue(st.session, clock, 'call', ticket.requester, 'requester', reply)
       if (worksNow) setFlag(st.session, 'userConfirmed', true)
@@ -222,9 +234,18 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
     },
 
     openApp(id) {
-      const w = get().windows
-      openWindow(w, id)
-      set({ windows: { ...w } })
+      const st = get()
+      openWindow(st.windows, id)
+
+      // Открытие просмотра событий — само по себе действие техника:
+      // именно оно отличает «запустил службу» от «разобрался».
+      if (id === 'eventvwr' && !st.session.flags.eventLogRead) {
+        setFlag(st.session, 'eventLogRead', true)
+        set({ windows: { ...st.windows }, session: { ...st.session } })
+        return
+      }
+
+      set({ windows: { ...st.windows } })
     },
 
     closeApp(id) {
@@ -261,6 +282,13 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
       const w = get().windows
       moveWindow(w, id, x, y)
       set({ windows: { ...w } })
+    },
+
+    setDesktopSize(w, h) {
+      const st = get().windows
+      if (st.viewport.w === w && st.viewport.h === h) return
+      setViewport(st, w, h)
+      set({ windows: { ...st } })
     },
 
     clearTerminal() {
@@ -323,10 +351,15 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
         world: st.world,
         ticket,
         session: st.session,
-        scenario: st.scenario,
+        scenario: scenarioFor(ticket.scenarioId),
       })
 
-      set({ queue: { ...st.queue }, scorecard, activeTool: 'scorecard' })
+      set({
+        queue: { ...st.queue },
+        scorecard,
+        scoredScenarioId: ticket.scenarioId,
+        activeTool: 'scorecard',
+      })
     },
   }))
 }
