@@ -2,7 +2,7 @@ import { useGame, type Tool } from '../store/useGame'
 import { IncidentRail } from './IncidentRail'
 import { QueueView } from './QueueView'
 import { TicketView } from './TicketView'
-import { TerminalView } from './TerminalView'
+import { RemoteDesktop } from './RemoteDesktop'
 import { ScorecardView } from './ScorecardView'
 import { BRAND } from '../brand'
 
@@ -42,7 +42,7 @@ export function Shell() {
       <main className="main">
         {tool === 'queue' && <QueueView />}
         {tool === 'ticket' && <TicketView />}
-        {tool === 'terminal' && <TerminalView />}
+        {tool === 'terminal' && <RemoteDesktop />}
         {tool === 'scorecard' && <ScorecardView />}
       </main>
     </div>

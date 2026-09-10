@@ -10,12 +10,20 @@ import { nslookup } from '../core/terminal/commands/nslookup'
 import { netsh } from '../core/terminal/commands/netsh'
 import { sc } from '../core/terminal/commands/sc'
 import { gradeIncident, type Scorecard } from '../core/grading/grade'
+import {
+  startService, stopService, setStartType, type OpResult,
+} from '../core/device/services'
 import { BRAND } from '../brand'
+import {
+  createWindows, openWindow, closeWindow, focusWindow, minimizeWindow,
+  restoreWindow, toggleMaximize, moveWindow, type WindowsState, type AppId,
+} from './windows'
 import type { Clock, WorldState } from '../core/world/types'
 import type { SessionLog } from '../core/session/types'
 import type { QueueState } from '../core/tickets/queue'
 import type { WorkflowStatus, ResolutionCode } from '../core/tickets/types'
 import type { Scenario } from '../core/scenario/types'
+import type { ServiceStartType } from '../core/world/types'
 
 export type Tool = 'queue' | 'ticket' | 'terminal' | 'scorecard'
 
@@ -32,6 +40,9 @@ export interface GameState {
   activeTool: Tool
   terminalLines: TerminalLine[]
   scorecard: Scorecard | null
+  windows: WindowsState
+  /** время симуляции — часы трея берут его отсюда, а не из Date.now() */
+  now: Date
 
   start(): void
   reset(): void
@@ -44,6 +55,19 @@ export interface GameState {
   resolveTicket(): void
   verifyIdentity(): void
   confirmWithUser(): void
+
+  openApp(id: AppId): void
+  closeApp(id: AppId): void
+  focusApp(id: AppId): void
+  minimizeApp(id: AppId): void
+  restoreApp(id: AppId): void
+  maximizeApp(id: AppId): void
+  dragApp(id: AppId, x: number, y: number): void
+
+  clearTerminal(): void
+  startServiceOn(name: string): OpResult
+  stopServiceOn(name: string): OpResult
+  setServiceStartType(name: string, type: ServiceStartType): OpResult
 }
 
 const banner = (): TerminalLine[] => [
@@ -70,6 +94,8 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
       activeTool: 'queue' as Tool,
       terminalLines: banner(),
       scorecard: null,
+      windows: createWindows(),
+      now: clock.now(),
     }
   }
 
@@ -193,6 +219,85 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
       })
 
       set({ session: { ...st.session }, queue: { ...st.queue } })
+    },
+
+    openApp(id) {
+      const w = get().windows
+      openWindow(w, id)
+      set({ windows: { ...w } })
+    },
+
+    closeApp(id) {
+      const w = get().windows
+      closeWindow(w, id)
+      set({ windows: { ...w } })
+    },
+
+    focusApp(id) {
+      const w = get().windows
+      focusWindow(w, id)
+      set({ windows: { ...w } })
+    },
+
+    minimizeApp(id) {
+      const w = get().windows
+      minimizeWindow(w, id)
+      set({ windows: { ...w } })
+    },
+
+    restoreApp(id) {
+      const w = get().windows
+      restoreWindow(w, id)
+      set({ windows: { ...w } })
+    },
+
+    maximizeApp(id) {
+      const w = get().windows
+      toggleMaximize(w, id)
+      set({ windows: { ...w } })
+    },
+
+    dragApp(id, x, y) {
+      const w = get().windows
+      moveWindow(w, id, x, y)
+      set({ windows: { ...w } })
+    },
+
+    clearTerminal() {
+      set({ terminalLines: [] })
+    },
+
+    /**
+     * Операции над службами из окна «Службы».
+     *
+     * Вызывают ровно те же функции, что и команда sc: окно и команда —
+     * оба представления, операция одна.
+     */
+    startServiceOn(name) {
+      const st = get()
+      if (!st.queue.assigned) return { ok: false, error: 'нет активного инцидента' }
+      const ticket = findTicket(st.queue, st.queue.assigned)
+      const r = startService(st.world, ticket.device, name, st.session, clock)
+      set({ world: { ...st.world }, session: { ...st.session } })
+      return r
+    },
+
+    stopServiceOn(name) {
+      const st = get()
+      if (!st.queue.assigned) return { ok: false, error: 'нет активного инцидента' }
+      const ticket = findTicket(st.queue, st.queue.assigned)
+      const r = stopService(st.world, ticket.device, name, st.session, clock)
+      set({ world: { ...st.world }, session: { ...st.session } })
+      return r
+    },
+
+    setServiceStartType(name, type) {
+      const st = get()
+      if (!st.queue.assigned) return { ok: false, error: 'нет активного инцидента' }
+      const ticket = findTicket(st.queue, st.queue.assigned)
+      const r = setStartType(st.world, ticket.device, name, type, st.session, clock)
+      set({ world: { ...st.world }, session: { ...st.session } })
+      return r
     },
 
     resolveTicket() {
