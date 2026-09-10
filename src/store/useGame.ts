@@ -8,6 +8,7 @@ import { ipconfig } from '../core/terminal/commands/ipconfig'
 import { ping } from '../core/terminal/commands/ping'
 import { nslookup } from '../core/terminal/commands/nslookup'
 import { netsh } from '../core/terminal/commands/netsh'
+import { sc } from '../core/terminal/commands/sc'
 import { gradeIncident, type Scorecard } from '../core/grading/grade'
 import { BRAND } from '../brand'
 import type { Clock, WorldState } from '../core/world/types'
@@ -57,6 +58,7 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
   registry.register('ping', ping)
   registry.register('nslookup', nslookup)
   registry.register('netsh', netsh)
+  registry.register('sc', sc)
 
   const fresh = () => {
     const { world, ticket } = loadScenario(apipaNoLease)
