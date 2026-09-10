@@ -15,8 +15,8 @@ export function seedWorld(): WorldState {
         {
    samAccountName: 'p.raman',
           displayName: 'Priya Raman',
-   dept: 'Sales',
-   title: 'Account Executive',
+   dept: 'Продажи',
+   title: 'менеджер по работе с клиентами',
           email: `priya.raman@${BRAND.domain}`,
           phone: '+1 (512) 555-0148',
    primaryDevice: 'AL-LPT-0447',
@@ -24,8 +24,8 @@ export function seedWorld(): WorldState {
         {
    samAccountName: 's.okafor',
           displayName: 'Sam Okafor',
-   dept: 'Finance',
-   title: 'Financial Analyst',
+   dept: 'Финансы',
+   title: 'финансовый аналитик',
           email: `sam.okafor@${BRAND.domain}`,
           phone: '+1 (512) 555-0152',
    primaryDevice: 'AL-DSK-0192',

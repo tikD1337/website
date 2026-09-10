@@ -328,8 +328,12 @@ textarea::placeholder { color: var(--faint); }
   padding: 10px 12px;
   height: calc(100vh - 190px);
   min-height: 300px;
-  overflow: auto;
-  white-space: pre;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Настоящая консоль переносит длинные строки, а не прокручивается вбок.
+     pre-wrap сохраняет выравнивание вывода ipconfig и при этом переносит. */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
   tab-size: 4;
 }
 

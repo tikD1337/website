@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useGame } from '../store/useGame'
 import { STATUS_LABELS } from '../core/tickets/types'
+import { withPlural } from './plural'
 
 /**
  * Значение, которое подсвечивается один раз, когда изменилось.
@@ -98,8 +99,8 @@ export function IncidentRail() {
       <div className="rail-block">
         <h3>Сделано</h3>
         <div className="tally">
-          <span>Команд: {session.commands.length}</span>
-          <span>Изменений: {session.changes.length}</span>
+          <span>{withPlural(session.commands.length, 'команда', 'команды', 'команд')}</span>
+          <span>{withPlural(session.changes.length, 'изменение', 'изменения', 'изменений')}</span>
           <span className={flags.identityVerified ? 'flag-on' : undefined}>
             {flags.identityVerified ? '✓' : '—'} личность подтверждена
           </span>

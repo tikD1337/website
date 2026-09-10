@@ -1,4 +1,5 @@
 import { useGame } from '../store/useGame'
+import { withPlural } from './plural'
 import type { Scorecard } from '../core/grading/grade'
 
 const VERDICT: Record<Scorecard['verdict'], string> = {
@@ -31,7 +32,7 @@ export function ScorecardView() {
         <h1>Разбор инцидента</h1>
         <p className={`verdict ${card.verdict}`}>
           <b>{VERDICT[card.verdict]}</b>
-          <span>{card.points} очков</span>
+          <span>{withPlural(card.points, 'очко', 'очка', 'очков')}</span>
         </p>
       </div>
 

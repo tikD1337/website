@@ -115,7 +115,8 @@ export function gradeIncident(args: GradeArgs): Scorecard {
 
   // Владение: взят до начала работы и доведён до закрытия.
   const claimedBeforeActing = ticket.createdAt !== null
-  const ownership = (claimedBeforeActing ? 6 : 0) + (ticket.status === 'completed' ? 4 : 0)
+  const closed = ticket.status === 'completed'
+  const ownership = (claimedBeforeActing ? 6 : 0) + (closed ? 4 : 0)
 
   // Расследование: доля диагностических целей, закрытых командами.
   const diagnostic = scenario.objectives.filter(o => o.commands.length > 0)
@@ -141,9 +142,11 @@ export function gradeIncident(args: GradeArgs): Scorecard {
       id: 'ownership',
       label: 'Владение тикетом',
       score: ownership,
-      explain: claimedBeforeActing
-        ? 'Тикет взят до начала работы и доведён до закрытия.'
-        : 'Работа началась раньше, чем тикет был взят в работу.',
+      explain: !claimedBeforeActing
+        ? 'Работа началась раньше, чем тикет был взят в работу.'
+        : closed
+          ? 'Тикет взят до начала работы и доведён до закрытия.'
+          : 'Тикет взят вовремя, но не доведён до закрытия.',
     },
     {
       id: 'investigation',

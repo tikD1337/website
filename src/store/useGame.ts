@@ -202,6 +202,16 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
       // Код закрытия обязателен: статус сам по себе тикет не закрывает.
       if (!ticket.resolutionCode) return
 
+      /*
+        Закрываем до оценки, а не после.
+
+        Оценка смотрит на итоговое состояние: доведён ли тикет до конца —
+        одно из шести измерений. Если считать раньше закрытия, статус
+        ещё «назначен», и владение недобирает баллы при безупречном
+        прохождении.
+      */
+      resolve(st.queue, assigned, ticket.resolutionCode)
+
       const scorecard = gradeIncident({
         world: st.world,
         ticket,
@@ -209,7 +219,6 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
         scenario: st.scenario,
       })
 
-      resolve(st.queue, assigned, ticket.resolutionCode)
       set({ queue: { ...st.queue }, scorecard, activeTool: 'scorecard' })
     },
   }))
