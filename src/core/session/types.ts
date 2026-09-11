@@ -69,6 +69,14 @@ export interface SessionLog {
    * обратившегося, техник не получает права менять чужие аккаунты.
    */
   verifiedAccount?: string
+  /**
+   * Просьбы к заявителю, которые он выполнил.
+   *
+   * Отдельно от изменений, потому что менял мир не техник. Для оценки
+   * важно именно это: догадался ли он, что часть работы делается не
+   * его руками.
+   */
+  askedFor: string[]
   commands: CommandEntry[]
   changes: ChangeEntry[]
   dialogue: DialogueEntry[]

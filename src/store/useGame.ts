@@ -1,5 +1,6 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand'
 import { loadScenarios } from '../core/scenario/load'
+import { applyInject } from '../core/world/world'
 import { SCENARIOS, scenarioFor } from '../scenarios'
 import { getPath } from '../core/world/path'
 import { createQueue, claim, setStatus, resolve, findTicket } from '../core/tickets/queue'
@@ -70,6 +71,7 @@ export interface GameState {
   resolveTicket(): void
   verifyRequester(field: VerificationField, answer: string): VerificationResult
   confirmWithUser(): void
+  askRequesterTo(askId: string): void
 
   openApp(id: AppId): void
   closeApp(id: AppId): void
@@ -285,6 +287,50 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
       })
 
       set({ session: { ...st.session }, queue: { ...st.queue } })
+    },
+
+    /**
+     * Попросить заявителя что-то сделать.
+     *
+     * Часть работы первой линии делается не техником: убрать старый
+     * пароль с телефона, выйти и войти заново. Мир меняет заявитель,
+     * поэтому запись идёт в `askedFor`, а не в журнал изменений —
+     * оценке важно, догадался ли техник попросить.
+     */
+    askRequesterTo(askId) {
+      const st = get()
+      if (!st.queue.assigned) return
+
+      const ticket = findTicket(st.queue, st.queue.assigned)
+      const scenario = scenarioFor(ticket.scenarioId)
+      const ask = scenario.asks?.find(a => a.id === askId)
+      if (!ask) return
+
+      // Просьба, не открытая расследованием, недоступна и из кода:
+      // интерфейс лишь не показывает её, а правило живёт здесь.
+      if (ask.unlockedBy) {
+        const flags = st.session.flags as unknown as Record<string, unknown>
+        if (flags[ask.unlockedBy] !== true) return
+      }
+
+      applyInject(st.world, ask.effect)
+
+      recordDialogue(st.session, clock, 'call', ticket.requester, 'technician', ask.ask)
+      recordDialogue(st.session, clock, 'call', ticket.requester, 'requester', ask.reply)
+
+      if (!st.session.askedFor.includes(askId)) st.session.askedFor.push(askId)
+
+      const at = clock.now().toISOString()
+      ticket.communications.push(
+        { at, channel: 'call', from: 'technician', text: ask.ask },
+        { at, channel: 'call', from: ticket.requester, text: ask.reply },
+      )
+
+      set({
+        world: { ...st.world },
+        session: { ...st.session },
+        queue: { ...st.queue },
+      })
     },
 
     openApp(id) {

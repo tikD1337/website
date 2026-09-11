@@ -61,6 +61,18 @@ function objectiveMet(o: Objective, session: SessionLog, ticket: Ticket): boolea
   const requiresOk = o.requires.every(req => {
     if (req === 'resolutionNotes') return ticket.resolutionNotes.trim().length > 0
     if (req === 'resolutionCode') return ticket.resolutionCode !== null
+
+    /*
+      Просьба к заявителю: «askedFor:clear-phone».
+
+      Отдельно от флагов, потому что мир менял не техник. Цель считается
+      закрытой, если он догадался попросить — а это и есть то, что
+      отличает «снял симптом» от «устранил причину».
+    */
+    if (req.startsWith('askedFor:')) {
+      return session.askedFor.includes(req.slice('askedFor:'.length))
+    }
+
     const flags = session.flags as unknown as Record<string, unknown>
     return flags[req] === true
   })

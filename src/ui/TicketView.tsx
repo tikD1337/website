@@ -28,6 +28,8 @@ export function TicketView() {
   const resolveTicket = useGame(s => s.resolveTicket)
   const verifyRequester = useGame(s => s.verifyRequester)
   const confirmWithUser = useGame(s => s.confirmWithUser)
+  const askRequesterTo = useGame(s => s.askRequesterTo)
+  const scenarios = useGame(s => s.scenarios)
   const setTicketStatus = useGame(s => s.setTicketStatus)
   const setTool = useGame(s => s.setTool)
 
@@ -52,6 +54,14 @@ export function TicketView() {
 
   const user = world.org.users.find(u => u.samAccountName === ticket.requester)
   const canResolve = ticket.resolutionCode !== null
+  /*
+    Показываем только те просьбы, которые техник уже заслужил
+    расследованием: текст просьбы — это диагноз, и до выяснения
+    причины его на экране быть не должно.
+  */
+  const flags = session.flags as unknown as Record<string, unknown>
+  const asks = (scenarios.find(sc => sc.id === ticket.scenarioId)?.asks ?? [])
+    .filter(a => !a.unlockedBy || flags[a.unlockedBy] === true)
 
   return (
     <>
@@ -149,12 +159,41 @@ export function TicketView() {
         </select>
       </div>
 
+      {/*
+        Просьбы к заявителю.
+
+        Часть работы первой линии делается не техником: убрать старый
+        пароль с телефона, выйти и войти заново. Кнопки объявляет
+        сценарий — ядро не знает ни про телефоны, ни про повторные входы.
+      */}
+      {asks.length > 0 && (
+        <div className="section">
+          <h2>Попросить заявителя</h2>
+          {asks.map(a => (
+            <div key={a.id} className="ask">
+              <p className="prose">{a.ask}</p>
+              <button
+                className="act"
+                type="button"
+                disabled={session.askedFor.includes(a.id)}
+                onClick={() => askRequesterTo(a.id)}
+              >
+                {session.askedFor.includes(a.id) ? 'Уже попросили' : 'Попросить'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {ticket.communications.length > 0 && (
         <div className="section">
           <h2>Общение с заявителем</h2>
           {ticket.communications.map((c, i) => (
             <p key={i} className="prose" style={{ marginBottom: 6 }}>
-              <span className="sub">{user?.displayName ?? c.from}: </span>
+              {/* реплики техника подписываются им, а не заявителем */}
+              <span className="sub">
+                {c.from === 'technician' ? 'Вы' : user?.displayName ?? c.from}:{' '}
+              </span>
               {c.text}
             </p>
           ))}

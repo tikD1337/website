@@ -55,12 +55,17 @@ describe('инъекция сценария попадает в нужную с�
   })
 })
 
-describe('очередь держит оба сценария', () => {
-  it('в очереди два тикета на разных машинах', () => {
+describe('очередь держит все сценарии', () => {
+  /*
+    Проверяется правило, а не число: каждый сценарий ломает свою машину,
+    поэтому они загружаются в один мир без конфликтов. Жёсткое «два»
+    падало от каждого нового сценария, ничего при этом не защищая.
+  */
+  it('на каждый сценарий свой тикет и своя машина', () => {
     const s = store()
-    expect(s().queue.tickets).toHaveLength(2)
+    expect(s().queue.tickets).toHaveLength(SCENARIOS.length)
     const devices = s().queue.tickets.map(t => t.device)
-    expect(new Set(devices).size).toBe(2)
+    expect(new Set(devices).size).toBe(devices.length)
   })
 
   it('второй тикет нельзя взять, пока не закрыт первый', () => {

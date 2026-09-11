@@ -606,6 +606,21 @@ tr.sel td { background: #232c38; }
 .stub { padding: 18px; color: var(--dim); max-width: 56ch; }
 .stub p { margin: 0 0 8px; }
 
+.ask {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.ask:last-child { border-bottom: 0; }
+
+@media (max-width: 700px) {
+  .ask { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* ── консоль каталога ────────────────────────────────────── */
 
 .dir {

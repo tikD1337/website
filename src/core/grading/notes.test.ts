@@ -127,6 +127,37 @@ describe('gradeNote — сверка с журналом, а не со слов�
 })
 
 describe('gradeNote — штрафы', () => {
+  /*
+    Штраф ловит секрет, а не слово «пароль».
+
+    Прежнее правило считало секретом любое слово из шести букв после
+    «пароль», и фраза «пароль верный, поэтому не сбрасывал» —
+    единственно верное решение в сценарии с блокировкой — теряла три
+    балла. В инцидентах про личность о пароле пишут всегда.
+  */
+  it('обычная фраза про пароль не штрафуется', () => {
+    for (const phrase of [
+      'Пароль верный, поэтому не сбрасывал.',
+      'Пароль меняли на прошлой неделе.',
+      'Попросил обновить пароль в почте на телефоне.',
+      'Сбросил пароль и передал его по отдельному каналу.',
+    ]) {
+      const r = gradeNote(GOOD + ' ' + phrase, s, ticket, apipaNoLease)
+      expect(r.penalties.map(p => p.id)).not.toContain('plaintext-secret')
+    }
+  })
+
+  it('настоящий временный пароль штрафуется в разных написаниях', () => {
+    for (const leak of [
+      'Временный пароль Qwerty123 передан пользователю.',
+      'пароль — Zima2026!',
+      'Новый пароль: Arcline#7788',
+    ]) {
+      const r = gradeNote(GOOD + ' ' + leak, s, ticket, apipaNoLease)
+      expect(r.penalties.map(p => p.id)).toContain('plaintext-secret')
+    }
+  })
+
   it('пароль открытым текстом штрафуется', () => {
     const r = gradeNote(GOOD + ' Временный пароль: Passw0rd!2026', s, ticket, apipaNoLease)
     expect(r.penalties.some(p => p.id === 'plaintext-secret')).toBe(true)

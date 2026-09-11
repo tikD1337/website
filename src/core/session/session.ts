@@ -5,6 +5,7 @@ import type {
 
 export function createSession(): SessionLog {
   return {
+    askedFor: [],
     commands: [],
     changes: [],
     dialogue: [],

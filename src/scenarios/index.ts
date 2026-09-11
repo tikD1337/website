@@ -1,5 +1,6 @@
 import { apipaNoLease } from './net-apipa-no-lease'
 import { printSpoolerStopped } from './print-spooler-stopped'
+import { identityAccountLockout } from './identity-account-lockout'
 import type { Scenario } from '../core/scenario/types'
 
 /**
@@ -8,7 +9,11 @@ import type { Scenario } from '../core/scenario/types'
  * Порядок задаёт порядок в очереди. Сценарии ломают разные машины,
  * поэтому загружаются в один мир без конфликтов.
  */
-export const SCENARIOS: Scenario[] = [apipaNoLease, printSpoolerStopped]
+export const SCENARIOS: Scenario[] = [
+  apipaNoLease,
+  printSpoolerStopped,
+  identityAccountLockout,
+]
 
 export function scenarioFor(id: string): Scenario {
   const found = SCENARIOS.find(s => s.id === id)
