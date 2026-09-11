@@ -52,3 +52,66 @@ describe('setPath', () => {
     expect(root.a.b).toBeNull()
   })
 })
+
+/*
+  Выбор элемента по полю.
+
+  Сценарий печати адресует службу индексом — `services.6.status`, — и
+  это держится только на тесте-стороже. С каждым новым сценарием таких
+  мест больше, а цена перестановки в seed растёт: патч молча попадёт
+  в чужой объект, и поломка окажется не той, что задумана.
+
+  `users[samAccountName=e.varga]` устойчив к перестановке и читается
+  без сверки с seed.
+*/
+describe('выбор по значению поля', () => {
+  const world = () => ({
+    org: {
+      users: [
+        { samAccountName: 'p.raman', lockedOut: false, groups: ['GRP-All-Staff'] },
+        { samAccountName: 'e.varga', lockedOut: false, groups: [] },
+      ],
+    },
+  })
+
+  it('читает поле выбранного объекта', () => {
+    expect(getPath(world(), 'org.users[samAccountName=e.varga].lockedOut')).toBe(false)
+  })
+
+  it('пишет в выбранный объект, не задевая соседей', () => {
+    const w = world()
+    setPath(w, 'org.users[samAccountName=e.varga].lockedOut', true)
+    expect(w.org.users[1]!.lockedOut).toBe(true)
+    expect(w.org.users[0]!.lockedOut).toBe(false)
+  })
+
+  it('работает в середине пути', () => {
+    expect(getPath(world(), 'org.users[samAccountName=p.raman].groups[0]'))
+      .toBe('GRP-All-Staff')
+  })
+
+  it('несовпадение даёт undefined при чтении', () => {
+    expect(getPath(world(), 'org.users[samAccountName=нет].lockedOut')).toBeUndefined()
+  })
+
+  /*
+    Запись по несуществующему выбору обязана падать: опечатка в имени
+    учётной записи иначе создаст сценарий, где ничего не сломано.
+  */
+  it('несовпадение при записи бросает исключение', () => {
+    expect(() => setPath(world(), 'org.users[samAccountName=нет].lockedOut', true))
+      .toThrow(/не существует|не найден/)
+  })
+
+  it('значение с дефисами и точками разбирается целиком', () => {
+    const w = {
+      shares: [{ path: '\\fileserver.arcline.corp\Finance', open: false }],
+    }
+    setPath(w, 'shares[path=\\fileserver.arcline.corp\Finance].open', true)
+    expect(w.shares[0]!.open).toBe(true)
+  })
+
+  it('числовой индекс продолжает работать', () => {
+    expect(getPath(world(), 'org.users[1].samAccountName')).toBe('e.varga')
+  })
+})

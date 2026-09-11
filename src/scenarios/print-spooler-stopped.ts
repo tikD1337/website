@@ -1,7 +1,9 @@
 import type { Scenario } from '../core/scenario/types'
 
 const HOST = 'AL-DSK-0192'
-const SVC = `devices.${HOST}.services`
+// Служба адресуется по имени, а не по индексу: перестановка в seed
+// иначе молча увела бы патч в соседнюю службу.
+const SPOOLER = `devices.${HOST}.services[name=Spooler]`
 
 /**
  * Оборудование · Печать — диспетчер печати остановлен и отключён.
@@ -36,8 +38,8 @@ export const printSpoolerStopped: Scenario = {
   slaResolveHours: 24,
 
   inject: [
-    { path: `${SVC}.6.status`, value: 'stopped' },
-    { path: `${SVC}.6.startType`, value: 'disabled' },
+    { path: `${SPOOLER}.status`, value: 'stopped' },
+    { path: `${SPOOLER}.startType`, value: 'disabled' },
     {
       path: `devices.${HOST}.eventLog`,
       value: [
@@ -206,7 +208,7 @@ export const printSpoolerStopped: Scenario = {
 
   silentFaultChecks: [
     {
-      path: `${SVC}.6.startType`,
+      path: `${SPOOLER}.startType`,
       notEquals: 'auto',
       message:
         'Диспетчер печати запущен, но тип запуска не возвращён в '
@@ -258,7 +260,7 @@ export const printSpoolerStopped: Scenario = {
   },
 
   fixedWhen: [
-    { path: `${SVC}.6.status`, equals: 'running', message: '' },
+    { path: `${SPOOLER}.status`, equals: 'running', message: '' },
   ],
 
   confirmReplies: [
