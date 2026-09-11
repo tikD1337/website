@@ -606,6 +606,87 @@ tr.sel td { background: #232c38; }
 .stub { padding: 18px; color: var(--dim); max-width: 56ch; }
 .stub p { margin: 0 0 8px; }
 
+/* ── консоль каталога ────────────────────────────────────── */
+
+.dir {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.dir-tree {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 6px;
+  background: #141a22;
+}
+
+.dir-tree button {
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 2px;
+  color: var(--dim);
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dir-tree button:hover { color: var(--text); }
+.dir-tree button[aria-current="true"] { background: #222a35; color: var(--text); }
+
+.dir-body { min-width: 0; }
+
+.dir-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 10px;
+}
+
+.dir-tabs button {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--dim);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dir-tabs button:hover { color: var(--text); }
+
+.dir-tabs button[aria-current="true"] {
+  color: var(--text);
+  border-bottom-color: var(--dim);
+}
+
+.dir-groups {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+}
+
+.dir-groups li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .dir { grid-template-columns: minmax(0, 1fr); }
+  .dir-tree { flex-direction: row; flex-wrap: wrap; }
+}
+
 /* ── панель задач ────────────────────────────────────────── */
 
 .taskbar {

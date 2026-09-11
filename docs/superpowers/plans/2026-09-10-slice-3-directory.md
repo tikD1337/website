@@ -119,10 +119,11 @@ verifyIdentity(world, sam, field, answer, session, clock) → boolean
 `net group`, `net localgroup`, `dsquery user`, `whoami /groups`.
 Вывод сверить с живой Windows.
 
-- [ ] Тест: `net user <имя>` печатает поля в формате Windows
-- [ ] **Тест: `net user /active:no` и `setEnabled` неотличимы**
-- [ ] Тест: `net user` неизвестного даёт ошибку 2221
-- [ ] Тест: `dsquery user` фильтрует по OU
+- [x] Тест: `net user <имя>` печатает поля в формате Windows
+- [x] **Тест: `net user /active:no` и `setEnabled` неотличимы**
+- [x] Тест: `net user` неизвестного даёт ошибку 2221
+- [x] Тест: `dsquery user` фильтрует по OU
+- [x] Разбор кавычек, whoami /groups, last logon, SID из имени
 
 ### Задача 3.5: Консоль каталога
 

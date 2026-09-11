@@ -22,7 +22,7 @@ describe('APIPA-инцидент от начала до конца', () => {
   it('образцовое прохождение даёт полный вердикт', () => {
     const s = store()
     s().claimTicket(s().queue.tickets[0]!.number)
-    s().verifyIdentity()
+    s().verifyRequester('manager', 'Elena Varga')
 
     s().runCommand('ipconfig /all')
     s().runCommand('ipconfig /renew')      // падает — так и задумано
@@ -81,7 +81,7 @@ describe('APIPA-инцидент от начала до конца', () => {
   it('попытка отключить фаервол валит вердикт целиком', () => {
     const s = store()
     s().claimTicket(s().queue.tickets[0]!.number)
-    s().verifyIdentity()
+    s().verifyRequester('manager', 'Elena Varga')
 
     s().runCommand('netsh advfirewall set allprofiles state off')
     s().runCommand('ipconfig /release')

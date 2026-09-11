@@ -17,6 +17,14 @@ import { gradeIncident, type Scorecard } from '../core/grading/grade'
 import {
   startService, stopService, setStartType, type OpResult,
 } from '../core/device/services'
+import {
+  unlockAccount, resetPassword, setEnabled, addToGroup, removeFromGroup,
+  type AccountResult,
+} from '../core/directory/accounts'
+import {
+  verifyIdentity as checkIdentity,
+  type VerificationField, type VerificationResult,
+} from '../core/directory/identity'
 import { BRAND } from '../brand'
 import {
   createWindows, openWindow, closeWindow, focusWindow, minimizeWindow,
@@ -30,7 +38,7 @@ import type { WorkflowStatus, ResolutionCode } from '../core/tickets/types'
 import type { Scenario } from '../core/scenario/types'
 import type { ServiceStartType } from '../core/world/types'
 
-export type Tool = 'queue' | 'ticket' | 'terminal' | 'scorecard'
+export type Tool = 'queue' | 'ticket' | 'terminal' | 'directory' | 'scorecard'
 
 export interface TerminalLine {
   kind: 'prompt' | 'output' | 'notice'
@@ -60,7 +68,7 @@ export interface GameState {
   saveResolutionNotes(text: string): void
   setResolutionCode(code: ResolutionCode): void
   resolveTicket(): void
-  verifyIdentity(): void
+  verifyRequester(field: VerificationField, answer: string): VerificationResult
   confirmWithUser(): void
 
   openApp(id: AppId): void
@@ -76,6 +84,12 @@ export interface GameState {
   startServiceOn(name: string): OpResult
   stopServiceOn(name: string): OpResult
   setServiceStartType(name: string, type: ServiceStartType): OpResult
+
+  unlockUser(sam: string): AccountResult
+  resetUserPassword(sam: string): AccountResult
+  setUserEnabled(sam: string, enabled: boolean): AccountResult
+  addUserToGroup(sam: string, group: string): AccountResult
+  removeUserFromGroup(sam: string, group: string): AccountResult
 }
 
 const banner = (): TerminalLine[] => [
@@ -111,7 +125,27 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
     }
   }
 
-  return create<GameState>((set, get) => ({
+  return create<GameState>((set, get) => {
+    /**
+     * Общая обвязка операций над каталогом.
+     *
+     * Каталог меняется только по взятому тикету — то же правило, что
+     * у машины: изменение без инцидента некому объяснить и нечем
+     * оправдать. Читать каталог при этом можно всегда.
+     */
+    const directoryOp = (
+      _sam: string,
+      run: (world: WorldState, session: SessionLog) => AccountResult,
+    ): AccountResult => {
+      const st = get()
+      if (!st.queue.assigned) return { ok: false, error: 'нет активного инцидента' }
+
+      const r = run(st.world, st.session)
+      set({ world: { ...st.world }, session: { ...st.session } })
+      return r
+    }
+
+    return {
     ...fresh(),
 
     start() {
@@ -196,10 +230,24 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
       set({ queue: { ...q } })
     },
 
-    verifyIdentity() {
-      const s = get().session
-      setFlag(s, 'identityVerified', true)
-      set({ session: { ...s } })
+    /**
+     * Сверка личности заявителя.
+     *
+     * Не кнопка «я подтвердил»: техник выбирает контрольное поле,
+     * вводит услышанный ответ, и он сверяется с каталогом. Раньше
+     * здесь поднимался голый флаг — шлюз считал непроверенным любого,
+     * потому что не знал, **кого** сверяли.
+     */
+    verifyRequester(field, answer) {
+      const st = get()
+      if (!st.queue.assigned) {
+        return { ok: false, expected: '', error: 'нет активного инцидента' }
+      }
+
+      const ticket = findTicket(st.queue, st.queue.assigned)
+      const r = checkIdentity(st.world, ticket.requester, field, answer, st.session, clock)
+      set({ session: { ...st.session } })
+      return r
     },
 
     /**
@@ -334,6 +382,38 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
       return r
     },
 
+    /**
+     * Операции над учётными записями из консоли каталога.
+     *
+     * Вызывают те же функции, что и команда `net`: консоль и команда —
+     * оба представления, операция одна. Изменения каталога, как и
+     * изменения машины, делаются только по взятому тикету.
+     */
+    unlockUser(sam) {
+      return directoryOp(sam, (world, session) =>
+        unlockAccount(world, sam, session, clock))
+    },
+
+    resetUserPassword(sam) {
+      return directoryOp(sam, (world, session) =>
+        resetPassword(world, sam, session, clock))
+    },
+
+    setUserEnabled(sam, enabled) {
+      return directoryOp(sam, (world, session) =>
+        setEnabled(world, sam, enabled, session, clock))
+    },
+
+    addUserToGroup(sam, group) {
+      return directoryOp(sam, (world, session) =>
+        addToGroup(world, sam, group, session, clock))
+    },
+
+    removeUserFromGroup(sam, group) {
+      return directoryOp(sam, (world, session) =>
+        removeFromGroup(world, sam, group, session, clock))
+    },
+
     resolveTicket() {
       const st = get()
       const assigned = st.queue.assigned
@@ -367,7 +447,8 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
         activeTool: 'scorecard',
       })
     },
-  }))
+    }
+  })
 }
 
 export const useGame = createGameStore({ now: () => new Date() })

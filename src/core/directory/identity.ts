@@ -18,6 +18,14 @@ import type { SessionLog } from '../session/types'
 /** Поле, по которому можно свериться. */
 export type VerificationField = 'manager' | 'office' | 'dept' | 'title'
 
+/** Короткое имя поля — для выбора в списке. */
+export const FIELD_LABEL: Record<VerificationField, string> = {
+  manager: 'Руководитель',
+  office: 'Кабинет',
+  dept: 'Отдел',
+  title: 'Должность',
+}
+
 export const FIELD_QUESTION: Record<VerificationField, string> = {
   manager: 'Назовите, пожалуйста, вашего руководителя',
   office: 'В каком кабинете вы сидите?',

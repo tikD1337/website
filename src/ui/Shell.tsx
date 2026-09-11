@@ -3,6 +3,7 @@ import { IncidentRail } from './IncidentRail'
 import { QueueView } from './QueueView'
 import { TicketView } from './TicketView'
 import { RemoteDesktop } from './RemoteDesktop'
+import { DirectoryConsole } from './apps/DirectoryConsole'
 import { ScorecardView } from './ScorecardView'
 import { BRAND } from '../brand'
 
@@ -10,6 +11,7 @@ const TOOLS: Array<{ id: Tool; label: string }> = [
   { id: 'queue', label: 'Очередь' },
   { id: 'ticket', label: 'Тикет' },
   { id: 'terminal', label: 'Удалёнка' },
+  { id: 'directory', label: 'Каталог' },
   { id: 'scorecard', label: 'Разбор' },
 ]
 
@@ -43,6 +45,7 @@ export function Shell() {
         {tool === 'queue' && <QueueView />}
         {tool === 'ticket' && <TicketView />}
         {tool === 'terminal' && <RemoteDesktop />}
+        {tool === 'directory' && <DirectoryConsole />}
         {tool === 'scorecard' && <ScorecardView />}
       </main>
     </div>

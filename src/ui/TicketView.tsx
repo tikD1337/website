@@ -4,6 +4,11 @@ import {
   RESOLUTION_LABELS, WORKFLOW_STATUSES, STATUS_LABELS,
   type ResolutionCode, type WorkflowStatus,
 } from '../core/tickets/types'
+import {
+  FIELD_QUESTION, FIELD_LABEL, type VerificationField,
+} from '../core/directory/identity'
+
+const FIELDS = Object.keys(FIELD_QUESTION) as VerificationField[]
 
 const NOTE_HINT = [
   'Симптом словами заявителя.',
@@ -21,13 +26,16 @@ export function TicketView() {
   const saveNotes = useGame(s => s.saveResolutionNotes)
   const setCode = useGame(s => s.setResolutionCode)
   const resolveTicket = useGame(s => s.resolveTicket)
-  const verifyIdentity = useGame(s => s.verifyIdentity)
+  const verifyRequester = useGame(s => s.verifyRequester)
   const confirmWithUser = useGame(s => s.confirmWithUser)
   const setTicketStatus = useGame(s => s.setTicketStatus)
   const setTool = useGame(s => s.setTool)
 
   const ticket = queue.tickets.find(t => t.number === queue.assigned)
   const [draft, setDraft] = useState('')
+  const [field, setField] = useState<VerificationField>('manager')
+  const [answer, setAnswer] = useState('')
+  const [verifyError, setVerifyError] = useState<string | null>(null)
 
   useEffect(() => {
     setDraft(ticket?.resolutionNotes ?? '')
@@ -63,14 +71,63 @@ export function TicketView() {
         </p>
       </div>
 
-      <div className="bar">
-        <button className="act" type="button" onClick={verifyIdentity}
-          disabled={session.flags.identityVerified}>
-          {session.flags.identityVerified
-            ? 'Личность подтверждена'
-            : 'Подтвердить личность'}
-        </button>
+      {/*
+        Сверка личности — настоящая проверка, а не кнопка «я подтвердил».
+        Техник выбирает контрольное поле, задаёт вопрос и вводит то, что
+        услышал; ответ сверяется с каталогом. Подтверждение относится к
+        конкретной учётной записи и чужие менять не даёт.
+      */}
+      <div className="section">
+        <h2>Сверка личности</h2>
 
+        {session.flags.identityVerified
+          && session.verifiedAccount === ticket.requester ? (
+            <p className="sub flag-on">
+              ✓ Личность подтверждена: {user?.displayName}.
+            </p>
+          ) : (
+            <>
+              <p className="prose">{FIELD_QUESTION[field]}</p>
+              <div className="bar">
+                <select
+                  aria-label="Контрольное поле"
+                  value={field}
+                  onChange={e => {
+                    setField(e.target.value as VerificationField)
+                    setVerifyError(null)
+                  }}
+                >
+                  {FIELDS.map(f => (
+                    <option key={f} value={f}>{FIELD_LABEL[f]}</option>
+                  ))}
+                </select>
+
+                <input
+                  aria-label="Ответ заявителя"
+                  value={answer}
+                  placeholder="Что ответил заявитель"
+                  onChange={e => setAnswer(e.target.value)}
+                />
+
+                <button
+                  className="act"
+                  type="button"
+                  onClick={() => {
+                    const r = verifyRequester(field, answer)
+                    setVerifyError(r.ok
+                      ? null
+                      : (r.error ?? 'Ответ не совпал с карточкой каталога.'))
+                  }}
+                >
+                  Сверить
+                </button>
+              </div>
+              {verifyError && <p className="deny">{verifyError}</p>}
+            </>
+          )}
+      </div>
+
+      <div className="bar">
         <button className="act" type="button" onClick={confirmWithUser}>
           Позвонить заявителю
         </button>
