@@ -125,7 +125,9 @@ export function seedGroups(): DirectoryGroup[] {
 }
 
 export function seedUsers(): OrgUser[] {
-  const never = '2026-07-01T09:00:00.000Z'
+  const pwdSet = '2026-07-01T09:00:00.000Z'
+  // Вчерашний вечер: все, кроме административной учётки, работали накануне.
+  const yesterday = '2026-09-09T17:42:11.000Z'
 
   return [
     {
@@ -143,7 +145,8 @@ export function seedUsers(): OrgUser[] {
       lockedOut: false,
       lockoutSource: null,
       pwdExpired: false,
-      pwdLastSet: never,
+      pwdLastSet: pwdSet,
+      lastLogon: yesterday,
       badPwdCount: 0,
       groups: ['GRP-All-Staff', 'GRP-Sales-Contracts', 'GRP-Printer-Floor3'],
     },
@@ -162,7 +165,8 @@ export function seedUsers(): OrgUser[] {
       lockedOut: false,
       lockoutSource: null,
       pwdExpired: false,
-      pwdLastSet: never,
+      pwdLastSet: pwdSet,
+      lastLogon: '2026-09-09T16:05:49.000Z',
       badPwdCount: 0,
       groups: ['GRP-All-Staff', 'GRP-Finance-Reports', 'GRP-Printer-Floor3'],
     },
@@ -181,7 +185,8 @@ export function seedUsers(): OrgUser[] {
       lockedOut: false,
       lockoutSource: null,
       pwdExpired: false,
-      pwdLastSet: never,
+      pwdLastSet: pwdSet,
+      lastLogon: '2026-09-09T18:20:03.000Z',
       badPwdCount: 0,
       groups: ['GRP-All-Staff', 'GRP-Printer-Floor3'],
     },
@@ -200,7 +205,8 @@ export function seedUsers(): OrgUser[] {
       lockedOut: false,
       lockoutSource: null,
       pwdExpired: false,
-      pwdLastSet: never,
+      pwdLastSet: pwdSet,
+      lastLogon: '2026-09-09T14:11:27.000Z',
       badPwdCount: 0,
       groups: ['GRP-All-Staff'],
     },
@@ -219,7 +225,9 @@ export function seedUsers(): OrgUser[] {
       lockedOut: false,
       lockoutSource: null,
       pwdExpired: false,
-      pwdLastSet: never,
+      pwdLastSet: pwdSet,
+      // Административной учётной записью давно не пользовались в интерактиве.
+      lastLogon: '2026-08-14T07:30:00.000Z',
       badPwdCount: 0,
       groups: ['Domain Admins'],
     },

@@ -190,6 +190,14 @@ export interface OrgUser {
   lockoutSource: string | null
   pwdExpired: boolean
   pwdLastSet: string
+  /**
+   * Последний успешный вход.
+   *
+   * Отдельно от смены пароля: по этому полю техник отличает «не может
+   * войти со вчера» от «не входил с отпуска», и в сценарии с
+   * блокировкой это первое, что нужно посмотреть.
+   */
+  lastLogon: string
   badPwdCount: number
   /** имена групп; согласовано с DirectoryGroup.members */
   groups: string[]

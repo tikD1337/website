@@ -10,6 +10,9 @@ import { ping } from '../core/terminal/commands/ping'
 import { nslookup } from '../core/terminal/commands/nslookup'
 import { netsh } from '../core/terminal/commands/netsh'
 import { sc } from '../core/terminal/commands/sc'
+import { net } from '../core/terminal/commands/net'
+import { dsquery } from '../core/terminal/commands/dsquery'
+import { whoami } from '../core/terminal/commands/whoami'
 import { gradeIncident, type Scorecard } from '../core/grading/grade'
 import {
   startService, stopService, setStartType, type OpResult,
@@ -88,6 +91,9 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
   registry.register('nslookup', nslookup)
   registry.register('netsh', netsh)
   registry.register('sc', sc)
+  registry.register('net', net)
+  registry.register('dsquery', dsquery)
+  registry.register('whoami', whoami)
 
   const fresh = () => {
     const { world, tickets } = loadScenarios(SCENARIOS)
