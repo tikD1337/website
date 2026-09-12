@@ -1,6 +1,7 @@
 import { apipaNoLease } from './net-apipa-no-lease'
 import { printSpoolerStopped } from './print-spooler-stopped'
 import { identityAccountLockout } from './identity-account-lockout'
+import { identityShareAccess } from './identity-share-access'
 import type { Scenario } from '../core/scenario/types'
 
 /**
@@ -13,6 +14,7 @@ export const SCENARIOS: Scenario[] = [
   apipaNoLease,
   printSpoolerStopped,
   identityAccountLockout,
+  identityShareAccess,
 ]
 
 export function scenarioFor(id: string): Scenario {

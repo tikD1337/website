@@ -27,5 +27,14 @@ export function cloneWorld(w: WorldState): WorldState {
  * которую игрок никогда не найдёт.
  */
 export function applyInject(w: WorldState, patches: InjectPatch[]): void {
-  for (const p of patches) setPath(w, p.path, p.value)
+  /*
+    Значение копируется, а не присваивается по ссылке.
+
+    Сценарий — модульная константа, и массив из его `inject` попадал
+    в мир той же ссылкой. Первая операция, добавляющая пользователю
+    группу, мутировала литерал внутри сценария: следующий запуск
+    получал мир, загрязнённый предыдущим прохождением, и вместо
+    поломки, описанной сценарием, — её остатки от прошлого раза.
+  */
+  for (const p of patches) setPath(w, p.path, structuredClone(p.value))
 }

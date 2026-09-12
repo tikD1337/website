@@ -94,3 +94,51 @@ describe('applyInject', () => {
     expect(w.devices['AL-DSK-0192']!.adapters[0]!.ip).toBe('10.20.14.91')
   })
 })
+
+/*
+  Инъекция копирует значение, а не присваивает по ссылке.
+
+  Найдено сквозным тестом: сценарий — модульная константа, и массив из
+  его `inject` попадал в мир той же ссылкой. Первая же операция,
+  добавляющая группу пользователю, мутировала литерал внутри сценария —
+  и следующий запуск получал мир, загрязнённый предыдущим прохождением.
+  Дефект был общим для всех срезов и молчал, потому что каждый тест
+  загружал сценарий один раз.
+*/
+describe('инъекция не делится ссылкой со сценарием', () => {
+  const patches = [{ path: 'org.users[samAccountName=p.raman].groups', value: ['GRP-A'] }]
+
+  it('мутация мира не задевает сценарий', () => {
+    const w = createWorld()
+    applyInject(w, patches)
+
+    const user = w.org.users.find(u => u.samAccountName === 'p.raman')!
+    ;(user.groups as string[]).push('GRP-Загрязнение')
+
+    expect(patches[0]!.value).toEqual(['GRP-A'])
+  })
+
+  it('повторная инъекция даёт тот же результат', () => {
+    const first = createWorld()
+    applyInject(first, patches)
+    const u1 = first.org.users.find(u => u.samAccountName === 'p.raman')!
+    ;(u1.groups as string[]).push('GRP-Загрязнение')
+
+    const second = createWorld()
+    applyInject(second, patches)
+    const u2 = second.org.users.find(u => u.samAccountName === 'p.raman')!
+
+    expect(u2.groups).toEqual(['GRP-A'])
+  })
+
+  it('вложенные объекты тоже копируются', () => {
+    const nested = [{
+      path: 'devices.AL-LPT-0447.eventLog',
+      value: [{ at: 'x', log: 'System', level: 'error', source: 's', eventId: 1, message: 'm' }],
+    }]
+    const w = createWorld()
+    applyInject(w, nested)
+    w.devices['AL-LPT-0447']!.eventLog[0]!.message = 'изменено'
+    expect((nested[0]!.value[0] as { message: string }).message).toBe('m')
+  })
+})

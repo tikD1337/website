@@ -49,16 +49,19 @@ export function seedShares(): FileShare[] {
       path: `\\\\fileserver.${BRAND.domain}\\Finance-Reports`,
       description: 'Отчётность финансового отдела',
       requiresGroup: 'GRP-Finance-Reports',
+      directAccess: [],
     },
     {
       path: `\\\\fileserver.${BRAND.domain}\\Sales-Contracts`,
       description: 'Договоры отдела продаж',
       requiresGroup: 'GRP-Sales-Contracts',
+      directAccess: [],
     },
     {
       path: `\\\\fileserver.${BRAND.domain}\\Company-Wide`,
       description: 'Общие документы',
       requiresGroup: 'GRP-All-Staff',
+      directAccess: [],
     },
   ]
 }
@@ -72,7 +75,7 @@ export function seedGroups(): DirectoryGroup[] {
       displayName: 'Все сотрудники',
       ou: SEC,
       description: 'Доступ к общим документам',
-      members: ['p.raman', 's.okafor', 'e.varga', 'd.mbeki'],
+      members: ['p.raman', 's.okafor', 'e.varga', 'd.mbeki', 'n.haruna'],
       grantsAccessTo: [`${fs}\\Company-Wide`],
       protected: false,
     },
@@ -99,7 +102,7 @@ export function seedGroups(): DirectoryGroup[] {
       displayName: 'Принтер, третий этаж',
       ou: SEC,
       description: 'Печать на принтере третьего этажа',
-      members: ['p.raman', 's.okafor', 'e.varga'],
+      members: ['p.raman', 's.okafor', 'e.varga', 'n.haruna'],
       grantsAccessTo: [],
       protected: false,
     },
@@ -149,6 +152,7 @@ export function seedUsers(): OrgUser[] {
       lastLogon: yesterday,
       badPwdCount: 0,
       groups: ['GRP-All-Staff', 'GRP-Sales-Contracts', 'GRP-Printer-Floor3'],
+      tokenGroups: ['GRP-All-Staff', 'GRP-Sales-Contracts', 'GRP-Printer-Floor3'],
     },
     {
       samAccountName: 's.okafor',
@@ -169,6 +173,7 @@ export function seedUsers(): OrgUser[] {
       lastLogon: '2026-09-09T16:05:49.000Z',
       badPwdCount: 0,
       groups: ['GRP-All-Staff', 'GRP-Finance-Reports', 'GRP-Printer-Floor3'],
+      tokenGroups: ['GRP-All-Staff', 'GRP-Finance-Reports', 'GRP-Printer-Floor3'],
     },
     {
       samAccountName: 'e.varga',
@@ -189,6 +194,7 @@ export function seedUsers(): OrgUser[] {
       lastLogon: '2026-09-09T18:20:03.000Z',
       badPwdCount: 0,
       groups: ['GRP-All-Staff', 'GRP-Printer-Floor3'],
+      tokenGroups: ['GRP-All-Staff', 'GRP-Printer-Floor3'],
     },
     {
       samAccountName: 'd.mbeki',
@@ -209,6 +215,34 @@ export function seedUsers(): OrgUser[] {
       lastLogon: '2026-09-09T14:11:27.000Z',
       badPwdCount: 0,
       groups: ['GRP-All-Staff'],
+      tokenGroups: ['GRP-All-Staff'],
+    },
+    {
+      /*
+        Новичок в финансах: вышла на позапрошлой неделе, при оформлении
+        в группу отдела её не добавили. Отсюда и сценарий с общей
+        папкой — проблема не в правах на файл, а в незавершённом
+        оформлении.
+      */
+      samAccountName: 'n.haruna',
+      displayName: 'Nadia Haruna',
+      dept: 'Финансы',
+      title: 'финансовый аналитик',
+      email: `nadia.haruna@${BRAND.domain}`,
+      phone: '+1 (512) 555-0183',
+      primaryDevice: 'AL-LPT-0714',
+      ou: `OU=Finance,${EMPLOYEES}`,
+      manager: 'Dumisani Mbeki',
+      office: '2-11',
+      enabled: true,
+      lockedOut: false,
+      lockoutSource: null,
+      pwdExpired: false,
+      pwdLastSet: '2026-08-31T09:12:00.000Z',
+      lastLogon: '2026-09-09T16:48:22.000Z',
+      badPwdCount: 0,
+      groups: ['GRP-All-Staff', 'GRP-Printer-Floor3'],
+      tokenGroups: ['GRP-All-Staff', 'GRP-Printer-Floor3'],
     },
     {
       samAccountName: 'a.tier0',
@@ -230,6 +264,7 @@ export function seedUsers(): OrgUser[] {
       lastLogon: '2026-08-14T07:30:00.000Z',
       badPwdCount: 0,
       groups: ['Domain Admins'],
+      tokenGroups: ['Domain Admins'],
     },
   ]
 }

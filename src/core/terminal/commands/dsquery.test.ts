@@ -4,7 +4,7 @@ import { whoami } from './whoami'
 import { createWorld } from '../../world/world'
 import { createSession } from '../../session/session'
 import { groupSid, userSid, DOMAIN_SID } from '../../directory/naming'
-import { findUser, findGroup } from '../../directory/accounts'
+import { findUser, findGroup, relogin } from '../../directory/accounts'
 import type { CommandContext } from '../types'
 
 const clock = { now: () => new Date('2026-09-10T11:00:00.000Z') }
@@ -42,9 +42,17 @@ describe('dsquery user', () => {
     expect(r.stdout).not.toContain('Sam Okafor')
   })
 
+  /*
+    Считаем от мира, а не константой: жёсткое число падало от каждого
+    нового человека в каталоге, ничего при этом не защищая. Проверяется
+    правило — поиск по поддереву находит всех сотрудников и никого из
+    административных учётных записей.
+  */
   it('поиск по подразделению включает вложенные', () => {
     const r = dsquery(['user', 'OU=Employees,OU=Corp,DC=arcline,DC=corp'], ctx)
-    expect(lines(r.stdout)).toHaveLength(4)
+    const employees = ctx.world.org.users.filter(u => u.ou.includes('OU=Employees'))
+    expect(lines(r.stdout)).toHaveLength(employees.length)
+    expect(r.stdout).not.toContain('a.tier0')
   })
 
   it('ключ -name фильтрует по имени с подстановкой', () => {
@@ -145,12 +153,21 @@ describe('whoami /groups', () => {
   })
 
   /*
-    Членство печатается из того же каталога, что и net user. Если бы
-    источники разошлись, техник увидел бы разные ответы на один вопрос
-    и перестал доверять обоим.
+    Печатается билет входа, а не карточка каталога.
+
+    Это два разных факта, а не два источника одной истины: `net user`
+    показывает, что записано в каталоге, `whoami /groups` — что попало
+    в билет при входе в систему. Расхождение между ними и есть штатный
+    способ диагностировать «добавил в группу, а доступа нет».
   */
-  it('добавление в группу немедленно видно в выводе', () => {
+  it('добавление в группу до повторного входа в билете не появляется', () => {
     findUser(ctx.world, 'p.raman')!.groups.push('GRP-Finance-Reports')
+    expect(whoami(['/groups'], ctx).stdout).not.toContain('ARCLINE\\GRP-Finance-Reports')
+  })
+
+  it('после повторного входа появляется', () => {
+    findUser(ctx.world, 'p.raman')!.groups.push('GRP-Finance-Reports')
+    relogin(ctx.world, 'p.raman', clock)
     expect(whoami(['/groups'], ctx).stdout).toContain('ARCLINE\\GRP-Finance-Reports')
   })
 

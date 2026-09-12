@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
   unlockAccount, resetPassword, setEnabled, addToGroup, removeFromGroup,
-  findUser, findGroup, hasShareAccess,
+  findUser, findGroup, hasShareAccess, grantDirectAccess, relogin,
 } from './accounts'
 import { createWorld } from '../world/world'
 import { createSession, setFlag } from '../session/session'
@@ -211,6 +211,61 @@ describe('addToGroup', () => {
   })
 })
 
+/*
+  Граница у привилегированной группы двусторонняя.
+
+  Добавление отклонялось, а исключение проходило: первая линия не могла
+  выдать права администратора домена, но могла их **отобрать**. Это
+  хуже исходной ошибки — отключить администратора посреди инцидента
+  куда разрушительнее, чем не добавить кого-то в группу.
+*/
+describe('исключение из привилегированной группы', () => {
+  it('отклоняется', () => {
+    verifiedFor('a.tier0')
+    const r = removeFromGroup(world, 'a.tier0', 'Domain Admins', session, clock)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('привилегированная')
+  })
+
+  it('состав группы не меняется', () => {
+    verifiedFor('a.tier0')
+    removeFromGroup(world, 'a.tier0', 'Domain Admins', session, clock)
+    expect(findGroup(world, 'Domain Admins')!.members).toContain('a.tier0')
+    expect(findUser(world, 'a.tier0')!.groups).toContain('Domain Admins')
+  })
+
+  it('попытка пишется как опасное действие', () => {
+    verifiedFor('a.tier0')
+    removeFromGroup(world, 'a.tier0', 'Domain Admins', session, clock)
+    expect(session.flags.dangerousActions).toHaveLength(1)
+  })
+})
+
+describe('relogin', () => {
+  it('переносит членство в билет входа', () => {
+    verifiedFor('p.raman')
+    addToGroup(world, 'p.raman', 'GRP-Finance-Reports', session, clock)
+    relogin(world, 'p.raman', clock)
+    expect(user().tokenGroups).toEqual(user().groups)
+  })
+
+  /*
+    Отметка последнего входа обязана обновиться: по ней техник отличает
+    «не может войти со вчера» от «не входил с отпуска». Раньше строка
+    записывала значение само в себя и не делала ничего.
+  */
+  it('обновляет отметку последнего входа', () => {
+    const before = user().lastLogon
+    relogin(world, 'p.raman', clock)
+    expect(user().lastLogon).not.toBe(before)
+    expect(user().lastLogon).toBe(clock.now().toISOString())
+  })
+
+  it('несуществующая учётка молча игнорируется', () => {
+    expect(() => relogin(world, 'нет.такого', clock)).not.toThrow()
+  })
+})
+
 describe('removeFromGroup', () => {
   beforeEach(() => verifiedFor('p.raman'))
 
@@ -238,14 +293,106 @@ describe('hasShareAccess', () => {
     expect(hasShareAccess(world, 'p.raman', share.path)).toBe(false)
   })
 
-  it('добавление в группу открывает доступ', () => {
+  it('добавление в группу открывает доступ после повторного входа', () => {
     verifiedFor('p.raman')
     const share = world.org.shares.find(s => s.requiresGroup === 'GRP-Finance-Reports')!
     addToGroup(world, 'p.raman', 'GRP-Finance-Reports', session, clock)
+    relogin(world, 'p.raman', clock)
     expect(hasShareAccess(world, 'p.raman', share.path)).toBe(true)
   })
 
   it('неизвестный ресурс доступа не даёт', () => {
     expect(hasShareAccess(world, 's.okafor', '\\\\нет\\такого')).toBe(false)
+  })
+})
+
+/*
+  Членство в группе действует не сразу.
+
+  Права выдаются при входе: билет пользователя содержит группы,
+  которые были у него на момент входа в систему. Добавление в группу
+  меняет каталог мгновенно, а доступ у человека появляется только
+  после повторного входа.
+
+  Это не придирка, а половина сценария с общей папкой: техник добавил
+  в группу, заявитель говорит «всё равно не пускает», и техник обязан
+  знать, что сказать дальше.
+*/
+describe('членство действует после повторного входа', () => {
+  const share = () =>
+    world.org.shares.find(s => s.requiresGroup === 'GRP-Finance-Reports')!
+
+  it('сразу после добавления доступа ещё нет', () => {
+    verifiedFor('p.raman')
+    addToGroup(world, 'p.raman', 'GRP-Finance-Reports', session, clock)
+    expect(hasShareAccess(world, 'p.raman', share().path)).toBe(false)
+  })
+
+  it('каталог при этом уже показывает членство', () => {
+    verifiedFor('p.raman')
+    addToGroup(world, 'p.raman', 'GRP-Finance-Reports', session, clock)
+    expect(user().groups).toContain('GRP-Finance-Reports')
+  })
+
+  it('повторный вход выдаёт доступ', () => {
+    verifiedFor('p.raman')
+    addToGroup(world, 'p.raman', 'GRP-Finance-Reports', session, clock)
+    relogin(world, 'p.raman', clock)
+    expect(hasShareAccess(world, 'p.raman', share().path)).toBe(true)
+  })
+
+  it('исключение из группы тоже действует после входа', () => {
+    verifiedFor('s.okafor')
+    removeFromGroup(world, 's.okafor', 'GRP-Finance-Reports', session, clock)
+    expect(hasShareAccess(world, 's.okafor', share().path)).toBe(true)
+    relogin(world, 's.okafor', clock)
+    expect(hasShareAccess(world, 's.okafor', share().path)).toBe(false)
+  })
+})
+
+/*
+  Прямой доступ мимо группы — ловушка сценария с общей папкой.
+
+  Работает сразу и поэтому выглядит удачным решением: права на
+  конкретного человека проверяются по его же билету, повторный вход не
+  нужен. Цена видна позже — при разборе прав это аномалия, а следующий
+  сотрудник отдела придёт с той же проблемой.
+*/
+describe('прямой доступ к ресурсу', () => {
+  const share = () =>
+    world.org.shares.find(s => s.requiresGroup === 'GRP-Finance-Reports')!
+
+  it('выдаётся и действует немедленно', () => {
+    verifiedFor('p.raman')
+    const r = grantDirectAccess(world, 'p.raman', share().path, session, clock)
+    expect(r.ok).toBe(true)
+    expect(hasShareAccess(world, 'p.raman', share().path)).toBe(true)
+  })
+
+  it('записывается в ресурс, а не в группу', () => {
+    verifiedFor('p.raman')
+    grantDirectAccess(world, 'p.raman', share().path, session, clock)
+    expect(share().directAccess).toContain('p.raman')
+    expect(findGroup(world, 'GRP-Finance-Reports')!.members).not.toContain('p.raman')
+  })
+
+  it('попадает в журнал изменений', () => {
+    verifiedFor('p.raman')
+    grantDirectAccess(world, 'p.raman', share().path, session, clock)
+    expect(session.changes.some(c => c.path.includes('directAccess'))).toBe(true)
+  })
+
+  it('повторная выдача не дублируется', () => {
+    verifiedFor('p.raman')
+    grantDirectAccess(world, 'p.raman', share().path, session, clock)
+    grantDirectAccess(world, 'p.raman', share().path, session, clock)
+    expect(share().directAccess.filter(x => x === 'p.raman')).toHaveLength(1)
+  })
+
+  it('неизвестный ресурс даёт внятную ошибку', () => {
+    verifiedFor('p.raman')
+    const r = grantDirectAccess(world, 'p.raman', '\\нет\такого', session, clock)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('ресурс')
   })
 })

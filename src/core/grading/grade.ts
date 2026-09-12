@@ -3,7 +3,7 @@ import type { NoteScore } from './types'
 import type { SessionLog } from '../session/types'
 import type { Ticket } from '../tickets/types'
 import type { Scenario, Objective } from '../scenario/types'
-import { getPath } from '../world/path'
+import { checkHolds, allHold } from '../scenario/check'
 import type { WorldState } from '../world/types'
 
 /**
@@ -54,9 +54,21 @@ export interface GradeArgs {
   scenario: Scenario
 }
 
-function objectiveMet(o: Objective, session: SessionLog, ticket: Ticket): boolean {
+function objectiveMet(
+  o: Objective, session: SessionLog, ticket: Ticket, world: WorldState,
+): boolean {
   const ran = new Set(session.commands.map(c => c.cmdline.toLowerCase().trim()))
   const commandsOk = o.commands.every(c => ran.has(c.toLowerCase().trim()))
+
+  /*
+    Состояние мира — доказательство для целей, которые делаются и
+    мышью, и командой: «снять блокировку», «добавить в группу»,
+    «вернуть тип запуска». До этого у них не было ни команд, ни
+    флагов, и `[].every()` засчитывал их всегда — разбор утверждал,
+    что техник сделал то, чего он не делал. Загрузчик теперь не
+    пропускает цель вообще без доказательств.
+  */
+  const stateOk = allHold(world, o.state ?? [])
 
   const requiresOk = o.requires.every(req => {
     if (req === 'resolutionNotes') return ticket.resolutionNotes.trim().length > 0
@@ -77,7 +89,7 @@ function objectiveMet(o: Objective, session: SessionLog, ticket: Ticket): boolea
     return flags[req] === true
   })
 
-  return commandsOk && requiresOk
+  return commandsOk && requiresOk && stateOk
 }
 
 /**
@@ -94,11 +106,7 @@ function detectSilentFaults(
 
   // Ловушки, объявленные сценарием: «починил, но оставил след».
   for (const check of scenario.silentFaultChecks ?? []) {
-    const value = getPath(world, check.path)
-    const hit =
-      ('equals' in check && value === check.equals)
-      || ('notEquals' in check && value !== check.notEquals)
-    if (hit) out.push(check.message)
+    if (checkHolds(world, check)) out.push(check.message)
   }
 
   const a = world.devices[ticket.device]?.adapters[0]
@@ -128,7 +136,7 @@ export function gradeIncident(args: GradeArgs): Scorecard {
   const objectives: ObjectiveResult[] = scenario.objectives.map(o => ({
     id: o.id,
     title: o.title,
-    met: objectiveMet(o, session, ticket),
+    met: objectiveMet(o, session, ticket, world),
     why: o.why,
   }))
 

@@ -1,8 +1,8 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand'
 import { loadScenarios } from '../core/scenario/load'
+import { allHold } from '../core/scenario/check'
 import { applyInject } from '../core/world/world'
 import { SCENARIOS, scenarioFor } from '../scenarios'
-import { getPath } from '../core/world/path'
 import { createQueue, claim, setStatus, resolve, findTicket } from '../core/tickets/queue'
 import { createSession, setFlag, recordDialogue } from '../core/session/session'
 import { createRegistry } from '../core/terminal/registry'
@@ -20,6 +20,7 @@ import {
 } from '../core/device/services'
 import {
   unlockAccount, resetPassword, setEnabled, addToGroup, removeFromGroup,
+  grantDirectAccess, hasShareAccess, relogin,
   type AccountResult,
 } from '../core/directory/accounts'
 import {
@@ -92,6 +93,9 @@ export interface GameState {
   setUserEnabled(sam: string, enabled: boolean): AccountResult
   addUserToGroup(sam: string, group: string): AccountResult
   removeUserFromGroup(sam: string, group: string): AccountResult
+  grantShareAccess(sam: string, sharePath: string): AccountResult
+  /** проверка доступа — только чтение, для окна общих ресурсов */
+  checkShareAccess(sam: string, sharePath: string): boolean
 }
 
 const banner = (): TerminalLine[] => [
@@ -266,12 +270,7 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
       const scenario = scenarioFor(ticket.scenarioId)
 
       // Заявитель судит по своей проблеме: условия задаёт сценарий.
-      const worksNow = scenario.fixedWhen.every(check => {
-        const value = getPath(st.world, check.path)
-        if ('equals' in check) return value === check.equals
-        if ('notEquals' in check) return value !== check.notEquals
-        return false
-      })
+      const worksNow = allHold(st.world, scenario.fixedWhen)
 
       const [good, bad] = scenario.confirmReplies
       const reply = worksNow ? good! : bad!
@@ -314,6 +313,7 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
       }
 
       applyInject(st.world, ask.effect)
+      if (ask.relogin) relogin(st.world, ask.relogin, clock)
 
       recordDialogue(st.session, clock, 'call', ticket.requester, 'technician', ask.ask)
       recordDialogue(st.session, clock, 'call', ticket.requester, 'requester', ask.reply)
@@ -458,6 +458,22 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
     removeUserFromGroup(sam, group) {
       return directoryOp(sam, (world, session) =>
         removeFromGroup(world, sam, group, session, clock))
+    },
+
+    /**
+     * Выдать доступ лично, минуя группу.
+     *
+     * Обходной путь, оставленный доступным намеренно: он работает сразу
+     * и потому выглядит удачным решением. Цена отложенная — аномалия
+     * при разборе прав и та же проблема у следующего сотрудника отдела.
+     */
+    grantShareAccess(sam, sharePath) {
+      return directoryOp(sam, (world, session) =>
+        grantDirectAccess(world, sam, sharePath, session, clock))
+    },
+
+    checkShareAccess(sam, sharePath) {
+      return hasShareAccess(get().world, sam, sharePath)
     },
 
     resolveTicket() {

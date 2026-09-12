@@ -190,6 +190,22 @@ export function removeFromGroup(
   const group = findGroup(world, groupName)
   if (!group) return fail(`группа ${groupName} не найдена`)
 
+  /*
+    Граница двусторонняя.
+
+    Раньше проверка стояла только на добавлении: первая линия не могла
+    выдать права администратора домена, но могла их отобрать. Это хуже
+    исходной ошибки — отключить администратора посреди инцидента
+    разрушительнее, чем кого-то не добавить.
+  */
+  if (group.protected) {
+    const reason = `${group.displayName} — привилегированная группа, `
+      + 'её состав первая линия не меняет'
+    addDangerousAction(session, clock,
+      `исключение из группы ${group.name}: ${user.samAccountName}`, reason)
+    return fail(`отказано: ${reason}`)
+  }
+
   const g = gate(world, session, clock, user.samAccountName,
     `исключение из группы ${group.name}`)
   if ('blocked' in g) return g.blocked
@@ -207,7 +223,17 @@ export function removeFromGroup(
   return { ok: true, flagged: g.flagged }
 }
 
-/** Есть ли у пользователя доступ к общему ресурсу — через группы. */
+/**
+ * Есть ли у пользователя доступ к общему ресурсу.
+ *
+ * Смотрит на билет входа, а не на текущее членство: права выдаются при
+ * входе в систему. Поэтому добавление в группу видно в консоли сразу,
+ * а человеку доступ откроется только после повторного входа.
+ *
+ * Личная выдача действует немедленно — она проверяется по списку
+ * ресурса, а не по билету. Отсюда и соблазн: обход работает сразу,
+ * а цена у него отложенная.
+ */
 export function hasShareAccess(
   world: WorldState, sam: string, sharePath: string,
 ): boolean {
@@ -217,5 +243,57 @@ export function hasShareAccess(
   const share = world.org.shares.find(s => s.path === sharePath)
   if (!share) return false
 
-  return user.groups.includes(share.requiresGroup)
+  return user.tokenGroups.includes(share.requiresGroup)
+    || share.directAccess.includes(user.samAccountName)
+}
+
+/**
+ * Повторный вход пользователя.
+ *
+ * Перевыпускает билет: членство, накопленное в каталоге, наконец
+ * начинает действовать. Мир меняет не техник, а заявитель — поэтому
+ * вызывается через просьбу к нему, а не напрямую.
+ */
+export function relogin(world: WorldState, sam: string, clock: Clock): void {
+  const user = findUser(world, sam)
+  if (!user) return
+  user.tokenGroups = [...user.groups]
+  // Вход состоялся — отметка обязана это показать: по ней техник
+  // отличает «не может войти со вчера» от «не входил с отпуска».
+  user.lastLogon = clock.now().toISOString()
+}
+
+/**
+ * Выдать доступ к ресурсу лично, в обход группы.
+ *
+ * Обходной путь, а не решение: работает немедленно и потому выглядит
+ * удачным. Но права на конкретного человека мимо группы — аномалия
+ * при разборе доступа, и следующий сотрудник того же отдела придёт с
+ * той же проблемой. Операция существует именно затем, чтобы техник мог
+ * совершить эту ошибку и увидеть её в разборе.
+ */
+export function grantDirectAccess(
+  world: WorldState, sam: string, sharePath: string,
+  session: SessionLog, clock: Clock,
+): AccountResult {
+  const user = findUser(world, sam)
+  if (!user) return fail(`учётная запись ${sam} не найдена`)
+
+  const share = world.org.shares.find(s => s.path === sharePath)
+  if (!share) return fail(`общий ресурс ${sharePath} не найден`)
+
+  const g = gate(world, session, clock, user.samAccountName,
+    `прямой доступ к ресурсу ${share.path}`)
+  if ('blocked' in g) return g.blocked
+
+  if (share.directAccess.includes(user.samAccountName)) {
+    return { ok: true, alreadyInState: true, flagged: g.flagged }
+  }
+
+  share.directAccess.push(user.samAccountName)
+
+  recordChange(session, clock,
+    `org.shares.${share.path}.directAccess`, null, user.samAccountName, !g.flagged)
+
+  return { ok: true, flagged: g.flagged }
 }

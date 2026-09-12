@@ -45,10 +45,18 @@ export function parsePath(path: string): Step[] {
   const flushBracket = () => {
     const eq = bracket.indexOf('=')
     if (eq === -1) {
-      const n = Number(bracket)
-      if (!Number.isInteger(n)) throw new Error(`некорректный путь: ${path}`)
-      out.push(n)
+      /*
+        Только десятичные цифры. `Number('')` равен нулю и целый,
+        поэтому проверка через `Number.isInteger` пропускала `[]` как
+        «нулевой элемент»: потерянное внутри скобок условие выбора
+        молча ломало первого человека в seed вместо заявителя. Заодно
+        отсекаются `0x10`, `1e3` и пробелы вокруг числа.
+      */
+      if (!/^\d+$/.test(bracket)) throw new Error(`некорректный путь: ${path}`)
+      out.push(Number(bracket))
     } else {
+      // Пустое имя поля не совпадёт ни с чем и вернуло бы undefined молча.
+      if (eq === 0) throw new Error(`некорректный путь: ${path}`)
       out.push({ field: bracket.slice(0, eq), value: bracket.slice(eq + 1) })
     }
     bracket = ''

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { loadScenario, incidentNumber } from './load'
+import { SCENARIOS } from '../../scenarios'
+import { loadScenario, loadScenarios, incidentNumber } from './load'
 import { apipaNoLease } from '../../scenarios/net-apipa-no-lease'
 
 describe('loadScenario', () => {
@@ -113,5 +114,65 @@ describe('сценарий APIPA', () => {
 
   it('ожидаемый исход — решено, а не эскалация', () => {
     expect(apipaNoLease.expectedResolution).toBe('solved')
+  })
+})
+
+/*
+  Цель без доказательств не должна существовать.
+
+  `[].every(...)` истинно, поэтому цель с пустыми `commands` и пустыми
+  `requires` засчитывалась **всегда**: разбор утверждал «блокировка
+  снята», когда учётка заблокирована, и «добавлен в группу», когда
+  техник выдал доступ в обход группы — то есть врал ровно в той цели,
+  вокруг которой построена ловушка сценария.
+
+  Сторож в загрузчике, а не в оценке: ошибка автора сценария должна
+  падать при загрузке, а не всплывать неверным разбором через полчаса
+  прохождения.
+*/
+describe('сторож: у каждой цели есть доказательство', () => {
+  const base = {
+    ...apipaNoLease,
+    objectives: [{
+      id: 'obj-пустая',
+      title: 'Цель без доказательств',
+      steps: [],
+      commands: [],
+      requires: [],
+      why: '',
+    }],
+  }
+
+  it('цель без команд, флагов и состояния не проходит загрузку', () => {
+    expect(() => loadScenario(base)).toThrow(/obj-пустая/)
+  })
+
+  it('сообщение объясняет, чего не хватает', () => {
+    expect(() => loadScenario(base)).toThrow(/commands|requires|state/)
+  })
+
+  it('достаточно одной команды', () => {
+    const s = { ...base, objectives: [{ ...base.objectives[0]!, commands: ['ipconfig /all'] }] }
+    expect(() => loadScenario(s)).not.toThrow()
+  })
+
+  it('достаточно одного флага', () => {
+    const s = { ...base, objectives: [{ ...base.objectives[0]!, requires: ['userConfirmed'] }] }
+    expect(() => loadScenario(s)).not.toThrow()
+  })
+
+  it('достаточно одной проверки состояния', () => {
+    const s = {
+      ...base,
+      objectives: [{
+        ...base.objectives[0]!,
+        state: [{ path: 'devices.AL-LPT-0447.adapters[0].linkUp', equals: true, message: '' }],
+      }],
+    }
+    expect(() => loadScenario(s)).not.toThrow()
+  })
+
+  it('все сценарии библиотеки проходят сторожа', () => {
+    expect(() => loadScenarios(SCENARIOS)).not.toThrow()
   })
 })

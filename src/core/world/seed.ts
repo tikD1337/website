@@ -291,6 +291,20 @@ export function seedWorld(): WorldState {
         disks: baseDisks(476, 388),
       },
 
+      'AL-LPT-0714': {
+        hostname: 'AL-LPT-0714',
+        assetTag: 'AL-L0714',
+        vendor: 'Novatek',
+        model: 'Corvus 14',
+        assignedTo: 'n.haruna',
+        adapters: [ethernet('E0-7B-35-4A-1D-62', '10.20.14.92')],
+        services: baseServices(),
+        processes: baseProcesses(),
+        eventLog: baseEventLog(),
+        drivers: baseDrivers('Novatek'),
+        disks: baseDisks(476, 431),
+      },
+
       'AL-DSK-0192': {
         hostname: 'AL-DSK-0192',
         assetTag: 'AL-D0192',

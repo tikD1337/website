@@ -141,6 +141,8 @@ export const printSpoolerStopped: Scenario = {
       ],
       commands: [],
       requires: [],
+      // Делается и мышью, и командой — доказательство одно: сам мир.
+      state: [{ path: `${SPOOLER}.startType`, equals: 'auto', message: '' }],
       why:
         'Служба, запущенная вручную при типе «отключена», не поднимется '
         + 'после перезагрузки. Печать пропадёт снова, и никто не поймёт почему.',
@@ -155,6 +157,7 @@ export const printSpoolerStopped: Scenario = {
       ],
       commands: [],
       requires: [],
+      state: [{ path: `${SPOOLER}.status`, equals: 'running', message: '' }],
       why: 'Это возвращает печать сегодня — но только сегодня.',
     },
     {
