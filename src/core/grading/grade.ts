@@ -167,17 +167,46 @@ export function gradeIncident(args: GradeArgs): Scorecard {
   const closed = ticket.status === 'completed'
   const ownership = (claimedBeforeActing ? 6 : 0) + (closed ? 4 : 0)
 
-  // Расследование: доля диагностических целей, закрытых командами.
+  /*
+    Расследование: доля диагностических целей плюс выясненный масштаб.
+
+    Масштаб — надбавка с потолком, а не слагаемое: «у коллег так же?»
+    отличает сломанный компьютер от сломанной системы и стоит балла,
+    но безупречное прохождение и без него остаётся на десятке. Потолок
+    сохраняет прежний максимум измерения, поэтому четыре пройденных
+    сценария не съезжают от появления надбавки.
+  */
   const diagnostic = scenario.objectives.filter(o => o.commands.length > 0)
   const metDiagnostic = objectives.filter(
     o => diagnostic.some(d => d.id === o.id) && o.met).length
-  const investigation = diagnostic.length === 0
+  const investigationBase = diagnostic.length === 0
     ? 10
     : Math.round((metDiagnostic / diagnostic.length) * 10)
 
-  // Коммуникация: личность до изменений, подтверждение — от заявителя.
-  const communication = (session.flags.identityVerified ? 4 : 0)
+  /*
+    Надбавка не дотягивает до максимума.
+
+    Простой потолок `min(10, base + 2)` давал десятку при четырёх
+    закрытых целях из пяти: разбор писал «закрыто 4 из 5» и тут же
+    ставил 10 из 10. Измерение противоречило собственному объяснению,
+    а выясненный масштаб маскировал недоделанное расследование.
+
+    Десятка — только за полное расследование; надбавка поощряет
+    масштаб, но выше девяти при неполной базе не поднимает.
+  */
+  const investigation = investigationBase === 10
+    ? 10
+    : Math.min(9, investigationBase + (session.flags.scopeChecked ? 2 : 0))
+
+  /*
+    Коммуникация: личность до изменений, подтверждение — от заявителя,
+    и связь прежде действия. Третье слагаемое тоже надбавка с потолком:
+    техник, который позвонил и предупредил, добирает балл, а тот, кто
+    сделал всё остальное идеально, десятку не теряет.
+  */
+  const communication = Math.min(10, (session.flags.identityVerified ? 4 : 0)
     + (session.flags.userConfirmed ? 6 : 0)
+    + (session.flags.announcedBeforeActing ? 2 : 0))
 
   // Полномочия: опасное действие обнуляет измерение целиком.
   const authority = dangerous > 0 ? 0 : codeRight ? 10 : 5
@@ -202,7 +231,11 @@ export function gradeIncident(args: GradeArgs): Scorecard {
       label: 'Расследование',
       score: investigation,
       explain: `Закрыто ${metDiagnostic} из ${diagnostic.length} `
-        + 'диагностических целей.',
+        + 'диагностических целей.'
+        + (session.flags.scopeChecked
+          ? ' Масштаб выяснен: спросили, у кого ещё так же.'
+          : ' Масштаб не выяснен — один это компьютер или весь отдел,'
+            + ' осталось неизвестным.'),
     },
     {
       id: 'documentation',
@@ -216,8 +249,12 @@ export function gradeIncident(args: GradeArgs): Scorecard {
       score: communication,
       explain: session.flags.userConfirmed
         ? 'Личность подтверждена, результат подтверждён заявителем.'
-        : 'Заявитель не подтвердил, что проблема ушла. Работающий у вас '
-          + 'экран этого не доказывает.',
+        : session.flags.announcedBeforeActing
+          ? 'Заявитель не подтвердил, что проблема ушла. Работающий у вас '
+            + 'экран этого не доказывает.'
+          : 'Заявитель не подтвердил, что проблема ушла, — работающий у вас '
+            + 'экран этого не доказывает, — и на связь до начала работы вы '
+            + 'не выходили.',
     },
     {
       id: 'authority',

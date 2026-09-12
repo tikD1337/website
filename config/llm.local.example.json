@@ -1,0 +1,6 @@
+{
+  "_": "Скопируйте этот файл в llm.local.json и впишите свои значения. llm.local.json лежит в .gitignore и в репозиторий не попадает.",
+  "target": "https://api.example-provider.com",
+  "apiKey": "sk-впишите-сюда-свой-ключ",
+  "pathPrefix": "/v1"
+}

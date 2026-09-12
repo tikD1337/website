@@ -33,14 +33,22 @@ import {
   restoreWindow, toggleMaximize, moveWindow, setViewport,
   type WindowsState, type AppId,
 } from './windows'
+import { createDialogue, type Dialogue } from '../core/dialogue/port'
+import { briefFor, contactBrief } from '../core/dialogue/brief'
+import { detectIntent } from '../core/dialogue/intent'
+import { loadConfig, saveConfig } from '../core/dialogue/store'
+import type { DialogueConfig } from '../core/dialogue/types'
+import type { Turn } from '../core/dialogue/types'
 import type { Clock, WorldState } from '../core/world/types'
-import type { SessionLog } from '../core/session/types'
+import type { SessionLog, DialogueChannel } from '../core/session/types'
 import type { QueueState } from '../core/tickets/queue'
 import type { WorkflowStatus, ResolutionCode } from '../core/tickets/types'
 import type { Scenario } from '../core/scenario/types'
 import type { ServiceStartType } from '../core/world/types'
 
-export type Tool = 'queue' | 'ticket' | 'terminal' | 'directory' | 'scorecard'
+export type Tool =
+  | 'queue' | 'ticket' | 'terminal' | 'directory' | 'comms'
+  | 'settings' | 'scorecard'
 
 export interface TerminalLine {
   kind: 'prompt' | 'output' | 'notice'
@@ -61,6 +69,23 @@ export interface GameState {
   /** время симуляции — часы трея берут его отсюда, а не из Date.now() */
   now: Date
 
+  /** канал общения: звонок, чат или почта */
+  channel: DialogueChannel
+  /** с кем сейчас разговор; null — никому не звонили */
+  talkingTo: string | null
+  /** реплика отправлена, ответ ещё не пришёл — модель может думать долго */
+  waitingReply: boolean
+  /**
+   * Почему ответ пришёл не от модели.
+   *
+   * Плашка обязательна: молчаливая подмена источника учила бы, что
+   * модель работает, когда она отключилась.
+   */
+  dialogueNotice: string | null
+  dialogueConfig: DialogueConfig
+  /** результат последней проверки соединения из экрана настроек */
+  probeResult: { ok: boolean; error?: string } | null
+
   start(): void
   reset(): void
   setTool(t: Tool): void
@@ -73,6 +98,15 @@ export interface GameState {
   verifyRequester(field: VerificationField, answer: string): VerificationResult
   confirmWithUser(): void
   askRequesterTo(askId: string): void
+
+  setChannel(c: DialogueChannel): void
+  /** снять трубку: выбрать собеседника из справочника */
+  callTo(sam: string): void
+  hangUp(): void
+  /** сказать реплику и получить ответ */
+  say(text: string): Promise<void>
+  setDialogueConfig(cfg: DialogueConfig): void
+  probeModel(): Promise<void>
 
   openApp(id: AppId): void
   closeApp(id: AppId): void
@@ -106,7 +140,10 @@ const banner = (): TerminalLine[] => [
   { kind: 'output', text: '' },
 ]
 
-export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>> {
+export function createGameStore(
+  clock: Clock,
+  dialogueDeps?: { fetch?: Parameters<typeof createDialogue>[0]['fetch'] },
+): UseBoundStore<StoreApi<GameState>> {
   const registry = createRegistry()
   registry.register('ipconfig', ipconfig)
   registry.register('ping', ping)
@@ -116,6 +153,16 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
   registry.register('net', net)
   registry.register('dsquery', dsquery)
   registry.register('whoami', whoami)
+
+  /*
+    Разъём диалога создаётся один раз на стор и переживает сброс мира:
+    настройки модели — состояние инструмента техника, а не инцидента.
+    Перезапуск тренировки не должен сбрасывать адрес Ollama.
+  */
+  const dialogue: Dialogue = createDialogue({
+    config: loadConfig(),
+    ...(dialogueDeps?.fetch ? { fetch: dialogueDeps.fetch } : {}),
+  })
 
   const fresh = () => {
     const { world, tickets } = loadScenarios(SCENARIOS)
@@ -130,6 +177,12 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
       scoredScenarioId: null,
       windows: createWindows(),
       now: clock.now(),
+      channel: 'call' as DialogueChannel,
+      talkingTo: null,
+      waitingReply: false,
+      dialogueNotice: null,
+      dialogueConfig: dialogue.config(),
+      probeResult: null,
     }
   }
 
@@ -277,15 +330,32 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
       const [good, bad] = scenario.confirmReplies
       const reply = worksNow ? good! : bad!
 
+      /*
+        Вопрос техника записывается наравне с ответом.
+
+        Раньше кнопка писала только реплику заявителя, и в переписке
+        выходило, что человек заговорил сам с собой. С появлением
+        разговора это стало и враньём в разборе: флаг «связались до
+        изменений» поднимается репликой техника, и звонивший кнопкой
+        читал «на связь до начала работы вы не выходили».
+      */
+      const question = 'Проверьте, пожалуйста, всё ли теперь работает.'
+
+      recordDialogue(st.session, clock, 'call', ticket.requester, 'technician', question)
       recordDialogue(st.session, clock, 'call', ticket.requester, 'requester', reply)
       if (worksNow) setFlag(st.session, 'userConfirmed', true)
 
-      ticket.communications.push({
-        at: clock.now().toISOString(),
-        channel: 'call',
-        from: ticket.requester,
-        text: reply,
-      })
+      const at = clock.now().toISOString()
+      ticket.communications.push(
+        {
+          at, channel: 'call', from: 'technician',
+          with: ticket.requester, text: question,
+        },
+        {
+          at, channel: 'call', from: ticket.requester,
+          with: ticket.requester, text: reply,
+        },
+      )
 
       set({ session: { ...st.session }, queue: { ...st.queue } })
     },
@@ -327,15 +397,21 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
         || allHold(st.world, scenario.fixedWhen)
       const reply = helped ? ask.reply : ask.replyIfBroken!
 
-      recordDialogue(st.session, clock, 'call', ticket.requester, 'technician', ask.ask)
-      recordDialogue(st.session, clock, 'call', ticket.requester, 'requester', reply)
+      recordDialogue(st.session, clock, st.channel, ticket.requester, 'technician', ask.ask)
+      recordDialogue(st.session, clock, st.channel, ticket.requester, 'requester', reply)
 
       if (!st.session.askedFor.includes(askId)) st.session.askedFor.push(askId)
 
       const at = clock.now().toISOString()
       ticket.communications.push(
-        { at, channel: 'call', from: 'technician', text: ask.ask },
-        { at, channel: 'call', from: ticket.requester, text: reply },
+        {
+          at, channel: st.channel, from: 'technician',
+          with: ticket.requester, text: ask.ask,
+        },
+        {
+          at, channel: st.channel, from: ticket.requester,
+          with: ticket.requester, text: reply,
+        },
       )
 
       set({
@@ -343,6 +419,164 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
         session: { ...st.session },
         queue: { ...st.queue },
       })
+    },
+
+    setChannel(c) {
+      set({ channel: c })
+    },
+
+    /**
+     * Позвонить, написать в чат или отправить письмо.
+     *
+     * Собеседник выбирается из справочника: звонить можно любому, и это
+     * не декорация — «спросите у коллеги, у него так же?» есть приём
+     * первой линии, за который оценка начисляет балл за масштаб.
+     */
+    callTo(sam) {
+      set({ talkingTo: sam, dialogueNotice: null })
+    },
+
+    hangUp() {
+      set({ talkingTo: null, dialogueNotice: null })
+    },
+
+    /**
+     * Сказать реплику и получить ответ.
+     *
+     * Собеседник отвечает через разъём: реплики сценария, локальная
+     * модель или свой эндпоинт — для стора это одно и то же. Отказ
+     * модели сюда не долетает: разъём возвращает реплику сценария с
+     * плашкой, и разговор продолжается.
+     */
+    async say(text) {
+      const trimmed = text.trim()
+      if (!trimmed) return
+
+      const st = get()
+      const assigned = st.queue.assigned
+      /*
+        Разговор требует взятого тикета — то же правило, что у удалёнки
+        и у изменений каталога. Звонить в рабочее время по чужим
+        инцидентам первая линия не ходит.
+      */
+      if (!assigned) return
+
+      const withWhom = st.talkingTo
+      if (!withWhom) return
+
+      const ticket = findTicket(st.queue, assigned)
+      const scenario = scenarioFor(ticket.scenarioId)
+      const isRequester = withWhom === ticket.requester
+
+      const brief = isRequester
+        ? briefFor(scenario, ticket, st.world)
+        : contactBrief(st.world, withWhom)
+
+      // История именно этого разговора: реплики другим собеседникам
+      // в контекст не идут.
+      const history: Turn[] = st.session.dialogue
+        .filter(d => d.with === withWhom)
+        .map(d => ({ speaker: d.speaker, text: d.text }))
+
+      const at = clock.now().toISOString()
+      recordDialogue(st.session, clock, st.channel, withWhom, 'technician', trimmed)
+      ticket.communications.push({
+        at, channel: st.channel, from: 'technician', with: withWhom, text: trimmed,
+      })
+
+      /*
+        Выяснение масштаба — измеряемое действие, а не болтовня:
+        «у коллег так же?» отличает сломанный компьютер от сломанной
+        системы. Флаг объявлен в срезе 0 и до появления разговора
+        поднять его было нечем.
+      */
+      if (detectIntent(trimmed) === 'scope') {
+        setFlag(st.session, 'scopeChecked', true)
+      }
+
+      set({
+        session: { ...st.session },
+        queue: { ...st.queue },
+        waitingReply: true,
+        dialogueNotice: null,
+      })
+
+      const r = await dialogue.reply({
+        channel: st.channel,
+        withWhom,
+        brief,
+        said: trimmed,
+        history,
+      })
+
+      const after = get()
+
+      /*
+        За время ответа модели могло произойти что угодно: техник сменил
+        собеседника, закрыл тикет, начал прохождение заново. Ответ,
+        пришедший в изменившийся мир, отбрасывается целиком.
+
+        Проверка `assigned` ловит закрытый тикет. Иначе реплика
+        дописалась бы в переписку уже закрытого инцидента, а
+        `userConfirmed` мог подняться задним числом: разбор на экране
+        говорит «заявитель не подтвердил», а журнал сессии утверждает
+        обратное.
+
+        Сравнение самого объекта тикета ловит сброс: `reset` собирает
+        очередь заново, и реплика из брошенного прохождения дописалась
+        бы в свежее — тот же род дефекта, что инъекция, делившаяся
+        ссылкой со сценарием. Обычные действия (окно, команда) тикет не
+        пересоздают, поэтому ложных срабатываний нет.
+      */
+      const ticketNow = after.queue.tickets.find(t => t.number === assigned)
+
+      const stale = after.talkingTo !== withWhom
+        || after.queue.assigned !== assigned
+        || ticketNow !== ticket
+
+      if (stale || !ticketNow) {
+        set({ waitingReply: false })
+        return
+      }
+      const replyAt = clock.now().toISOString()
+
+      recordDialogue(after.session, clock, after.channel, withWhom, 'requester', r.text)
+      ticketNow.communications.push({
+        at: replyAt, channel: after.channel, from: withWhom,
+        with: withWhom, text: r.text,
+      })
+
+      /*
+        Подтверждение засчитывается по состоянию мира, а не по словам:
+        модель может сказать «спасибо, работает» из вежливости, и
+        принимать это за подтверждение значило бы сделать её оракулом.
+        Заявитель подтверждает только то, что действительно починено,
+        и только про свой инцидент.
+      */
+      if (isRequester
+        && detectIntent(trimmed) === 'retry'
+        && allHold(after.world, scenario.fixedWhen)) {
+        setFlag(after.session, 'userConfirmed', true)
+      }
+
+      set({
+        session: { ...after.session },
+        queue: { ...after.queue },
+        waitingReply: false,
+        dialogueNotice: r.notice ?? null,
+      })
+    },
+
+    setDialogueConfig(cfg) {
+      dialogue.configure(cfg)
+      // Режим, адрес и модель переживают перезагрузку; ключ — нет.
+      saveConfig(cfg)
+      set({ dialogueConfig: cfg, probeResult: null, dialogueNotice: null })
+    },
+
+    async probeModel() {
+      const r = await dialogue.probe()
+      set({ probeResult: r })
     },
 
     openApp(id) {
