@@ -124,6 +124,28 @@ describe('связь до начала работы', () => {
     s().verifyRequester('manager', 'Dumisani Mbeki')
     expect(s().session.flags.announcedBeforeActing).toBe(true)
   })
+
+  /*
+    Найдено разбором кода: кнопка «Позвонить заявителю» записывала
+    только ответ, без вопроса. Флаг связи поднимается репликой техника,
+    поэтому звонивший кнопкой читал в разборе «на связь до начала
+    работы вы не выходили» — при том что звонил.
+  */
+  it('кнопка звонка засчитывается как связь', () => {
+    const s = store()
+    s().confirmWithUser()
+    expect(s().session.flags.announcedBeforeActing).toBe(true)
+  })
+
+  it('в переписке виден и вопрос техника, и ответ', () => {
+    const s = store()
+    s().confirmWithUser()
+
+    const ticket = s().queue.tickets.find(t => t.number === s().queue.assigned)!
+    expect(ticket.communications).toHaveLength(2)
+    expect(ticket.communications[0]!.from).toBe('technician')
+    expect(ticket.communications[1]!.from).toBe('e.varga')
+  })
 })
 
 describe('выяснение масштаба', () => {
@@ -317,6 +339,100 @@ describe('состояние ожидания', () => {
     release!()
     await pending
     expect(s().waitingReply).toBe(false)
+  })
+
+  /*
+    Найдено разбором кода: после await проверялся только собеседник.
+    Закрытый тикет, сброс и смена инцидента пропускали ответ в
+    изменившийся мир — реплика дописывалась в закрытую переписку, а
+    `userConfirmed` мог подняться уже после того, как разбор посчитан
+    и показан.
+  */
+  it('закрытие тикета во время ожидания отбрасывает ответ', async () => {
+    let release: (() => void) | null = null
+    const slow: FetchLike = async () => {
+      await new Promise<void>(r => { release = r })
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ choices: [{ message: { content: 'поздний ответ' } }] }),
+      }
+    }
+    const s = store(slow)
+    s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    s().unlockUser('e.varga')
+    s().callTo('e.varga')
+
+    const pending = s().say('Попробуйте войти сейчас')
+
+    s().saveResolutionNotes('Снял блокировку с e.varga.')
+    s().setResolutionCode('solved')
+    s().resolveTicket()
+    const confirmedAtGrading = s().scorecard!.dimensions
+      .find(d => d.id === 'communication')!.score
+
+    release!()
+    await pending
+
+    const ticket = s().queue.tickets.find(
+      t => t.scenarioId === 'identity-account-lockout')!
+    expect(ticket.communications.some(c => c.text === 'поздний ответ')).toBe(false)
+    // разбор посчитан и остаётся правдой
+    expect(s().scorecard!.dimensions.find(d => d.id === 'communication')!.score)
+      .toBe(confirmedAtGrading)
+  })
+
+  it('сброс во время ожидания не пачкает новое прохождение', async () => {
+    let release: (() => void) | null = null
+    const slow: FetchLike = async () => {
+      await new Promise<void>(r => { release = r })
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ choices: [{ message: { content: 'из прошлой игры' } }] }),
+      }
+    }
+    const s = store(slow)
+    s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
+    s().callTo('e.varga')
+
+    const pending = s().say('Здравствуйте')
+    s().reset()
+
+    release!()
+    await pending
+
+    expect(s().session.dialogue).toHaveLength(0)
+    expect(s().queue.tickets.every(
+      t => t.communications.length === 0)).toBe(true)
+  })
+
+  /* Обычные действия во время ожидания ответ не отбрасывают. */
+  it('работа в других инструментах ответу не мешает', async () => {
+    let release: (() => void) | null = null
+    const slow: FetchLike = async () => {
+      await new Promise<void>(r => { release = r })
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ choices: [{ message: { content: 'дошёл ответ' } }] }),
+      }
+    }
+    const s = store(slow)
+    s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
+    s().callTo('e.varga')
+
+    const pending = s().say('Здравствуйте')
+
+    s().openApp('eventvwr')
+    s().runCommand('net user e.varga')
+    s().inspectObject('user', 'e.varga')
+
+    release!()
+    await pending
+
+    expect(s().session.dialogue.at(-1)!.text).toBe('дошёл ответ')
   })
 
   it('смена собеседника во время ожидания отбрасывает ответ', async () => {

@@ -182,8 +182,21 @@ export function gradeIncident(args: GradeArgs): Scorecard {
   const investigationBase = diagnostic.length === 0
     ? 10
     : Math.round((metDiagnostic / diagnostic.length) * 10)
-  const investigation = Math.min(
-    10, investigationBase + (session.flags.scopeChecked ? 2 : 0))
+
+  /*
+    Надбавка не дотягивает до максимума.
+
+    Простой потолок `min(10, base + 2)` давал десятку при четырёх
+    закрытых целях из пяти: разбор писал «закрыто 4 из 5» и тут же
+    ставил 10 из 10. Измерение противоречило собственному объяснению,
+    а выясненный масштаб маскировал недоделанное расследование.
+
+    Десятка — только за полное расследование; надбавка поощряет
+    масштаб, но выше девяти при неполной базе не поднимает.
+  */
+  const investigation = investigationBase === 10
+    ? 10
+    : Math.min(9, investigationBase + (session.flags.scopeChecked ? 2 : 0))
 
   /*
     Коммуникация: личность до изменений, подтверждение — от заявителя,

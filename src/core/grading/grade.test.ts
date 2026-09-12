@@ -6,6 +6,7 @@ import {
 } from '../session/session'
 import { loadScenario } from '../scenario/load'
 import { apipaNoLease } from '../../scenarios/net-apipa-no-lease'
+import { identityShareAccess } from '../../scenarios/identity-share-access'
 import type { GradeArgs } from './grade'
 
 const clock = { now: () => new Date('2026-09-09T18:00:00.000Z') }
@@ -80,6 +81,60 @@ describe('gradeIncident — образцовое прохождение', () => 
       expect(d.score, `измерение ${d.id}`).toBeGreaterThanOrEqual(8)
       expect(d.explain.length).toBeGreaterThan(15)
     }
+  })
+})
+
+/*
+  Найдено разбором кода: надбавка за выясненный масштаб давала десятку
+  при незакрытых диагностических целях. Разбор писал «закрыто 1 из 2» и
+  тут же ставил 10 из 10 — измерение противоречило собственному
+  объяснению, а масштаб маскировал недоделанное расследование.
+*/
+describe('надбавка за масштаб не маскирует незакрытые цели', () => {
+  const scenario = identityShareAccess
+
+  const run = (opts: { scope: boolean; investigate: boolean }) => {
+    const { world, ticket } = loadScenario(scenario)
+    const session = createSession()
+    const clock = { now: () => new Date('2026-09-12T10:00:00.000Z') }
+
+    if (opts.scope) setFlag(session, 'scopeChecked', true)
+    if (opts.investigate) {
+      recordCommand(session, clock, ticket.device, 'net user n.haruna', 0)
+      recordCommand(session, clock, ticket.device,
+        'dsquery group -name GRP-Finance*', 0)
+    }
+
+    ticket.status = 'completed'
+    return gradeIncident({ world, ticket, session, scenario })
+  }
+
+  it('неполное расследование не получает максимум даже с масштабом', () => {
+    const card = run({ scope: true, investigate: false })
+    const inv = card.dimensions.find(d => d.id === 'investigation')!
+    expect(inv.score).toBeLessThan(10)
+  })
+
+  it('масштаб всё же добавляет балл к неполному расследованию', () => {
+    const withScope = run({ scope: true, investigate: false })
+    const without = run({ scope: false, investigate: false })
+
+    const score = (c: typeof withScope) =>
+      c.dimensions.find(d => d.id === 'investigation')!.score
+
+    expect(score(withScope)).toBeGreaterThan(score(without))
+  })
+
+  it('полное расследование даёт максимум и без масштаба', () => {
+    const card = run({ scope: false, investigate: true })
+    expect(card.dimensions.find(d => d.id === 'investigation')!.score).toBe(10)
+  })
+
+  it('объяснение не противоречит баллу', () => {
+    const card = run({ scope: true, investigate: false })
+    const inv = card.dimensions.find(d => d.id === 'investigation')!
+    expect(inv.explain).toContain('Закрыто 0 из 2')
+    expect(inv.score).toBeLessThan(10)
   })
 })
 

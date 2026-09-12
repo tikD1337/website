@@ -72,9 +72,20 @@ export function createDialogue(deps: DialogueDeps): Dialogue {
     config: () => cfg,
 
     configure(next) {
+      /*
+        Новую попытку даёт только изменение самого подключения.
+
+        Сбрасывать размыкатель на любую правку настроек нельзя:
+        переключение озвучки идёт тем же путём, и после него каждая
+        реплика снова ждала бы таймаут погашенной модели.
+      */
+      const reconnected = next.mode !== cfg.mode
+        || next.baseUrl !== cfg.baseUrl
+        || next.model !== cfg.model
+        || next.apiKey !== cfg.apiKey
+
       cfg = next
-      // Настройки поменялись — модель заслуживает новой попытки.
-      broken = false
+      if (reconnected) broken = false
     },
 
     tripped: () => broken,

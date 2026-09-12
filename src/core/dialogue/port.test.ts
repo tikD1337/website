@@ -197,6 +197,42 @@ describe('деградация', () => {
     expect(second.text).toContain('на прошлой неделе')
   })
 
+  /*
+    Найдено разбором кода: размыкатель сбрасывался на любую правку
+    настроек. Переключение озвучки идёт тем же путём, и после него
+    каждая реплика снова ждала таймаут погашенной модели.
+  */
+  it('переключение озвучки размыкатель не сбрасывает', async () => {
+    const fetch = vi.fn(async () => { throw new Error('нет сети') })
+    const d = createDialogue({ config: cfg(), fetch: fetch as never })
+
+    await d.reply(req())
+    expect(d.tripped()).toBe(true)
+
+    d.configure(cfg({ speak: true }))
+    expect(d.tripped()).toBe(true)
+
+    await d.reply(req())
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('смена адреса размыкатель сбрасывает', () => {
+    const fetch = vi.fn(async () => { throw new Error('нет сети') })
+    const d = createDialogue({ config: cfg(), fetch: fetch as never })
+    return d.reply(req()).then(() => {
+      d.configure(cfg({ baseUrl: 'http://localhost:9999/v1' }))
+      expect(d.tripped()).toBe(false)
+    })
+  })
+
+  it('смена режима размыкатель сбрасывает', async () => {
+    const fetch = vi.fn(async () => { throw new Error('нет сети') })
+    const d = createDialogue({ config: cfg(), fetch: fetch as never })
+    await d.reply(req())
+    d.configure(cfg({ mode: 'endpoint' }))
+    expect(d.tripped()).toBe(false)
+  })
+
   it('смена настроек даёт модели новую попытку', async () => {
     let fail = true
     const fetch = vi.fn(async () => {

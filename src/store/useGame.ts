@@ -330,16 +330,32 @@ export function createGameStore(
       const [good, bad] = scenario.confirmReplies
       const reply = worksNow ? good! : bad!
 
+      /*
+        Вопрос техника записывается наравне с ответом.
+
+        Раньше кнопка писала только реплику заявителя, и в переписке
+        выходило, что человек заговорил сам с собой. С появлением
+        разговора это стало и враньём в разборе: флаг «связались до
+        изменений» поднимается репликой техника, и звонивший кнопкой
+        читал «на связь до начала работы вы не выходили».
+      */
+      const question = 'Проверьте, пожалуйста, всё ли теперь работает.'
+
+      recordDialogue(st.session, clock, 'call', ticket.requester, 'technician', question)
       recordDialogue(st.session, clock, 'call', ticket.requester, 'requester', reply)
       if (worksNow) setFlag(st.session, 'userConfirmed', true)
 
-      ticket.communications.push({
-        at: clock.now().toISOString(),
-        channel: 'call',
-        from: ticket.requester,
-        with: ticket.requester,
-        text: reply,
-      })
+      const at = clock.now().toISOString()
+      ticket.communications.push(
+        {
+          at, channel: 'call', from: 'technician',
+          with: ticket.requester, text: question,
+        },
+        {
+          at, channel: 'call', from: ticket.requester,
+          with: ticket.requester, text: reply,
+        },
+      )
 
       set({ session: { ...st.session }, queue: { ...st.queue } })
     },
@@ -494,13 +510,34 @@ export function createGameStore(
       })
 
       const after = get()
-      // Собеседник мог смениться, пока модель думала.
-      if (after.talkingTo !== withWhom) {
+
+      /*
+        За время ответа модели могло произойти что угодно: техник сменил
+        собеседника, закрыл тикет, начал прохождение заново. Ответ,
+        пришедший в изменившийся мир, отбрасывается целиком.
+
+        Проверка `assigned` ловит закрытый тикет. Иначе реплика
+        дописалась бы в переписку уже закрытого инцидента, а
+        `userConfirmed` мог подняться задним числом: разбор на экране
+        говорит «заявитель не подтвердил», а журнал сессии утверждает
+        обратное.
+
+        Сравнение самого объекта тикета ловит сброс: `reset` собирает
+        очередь заново, и реплика из брошенного прохождения дописалась
+        бы в свежее — тот же род дефекта, что инъекция, делившаяся
+        ссылкой со сценарием. Обычные действия (окно, команда) тикет не
+        пересоздают, поэтому ложных срабатываний нет.
+      */
+      const ticketNow = after.queue.tickets.find(t => t.number === assigned)
+
+      const stale = after.talkingTo !== withWhom
+        || after.queue.assigned !== assigned
+        || ticketNow !== ticket
+
+      if (stale || !ticketNow) {
         set({ waitingReply: false })
         return
       }
-
-      const ticketNow = findTicket(after.queue, assigned)
       const replyAt = clock.now().toISOString()
 
       recordDialogue(after.session, clock, after.channel, withWhom, 'requester', r.text)
