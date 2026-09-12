@@ -299,6 +299,20 @@ button.act:hover:not(:disabled) { background: #252c37; border-color: #4a5563; }
 button.act:disabled { opacity: 0.4; cursor: not-allowed; }
 button.act.primary { background: #2a323d; font-weight: 600; }
 
+/*
+  Выбранный из нескольких — яркостью и рамкой, не цветом.
+
+  Найдено на скриншоте: три кнопки канала («Звонок», «Чат», «Почта»)
+  выглядели одинаково, и понять, каким каналом идёт разговор, было
+  нельзя.
+*/
+button.act[aria-current="true"] {
+  background: #2f3846;
+  border-color: var(--text);
+  color: var(--text);
+  font-weight: 600;
+}
+
 select { cursor: pointer; padding-right: 8px; }
 
 textarea {
@@ -759,4 +773,162 @@ tr.sel td { background: #232c38; }
 @media (max-width: 680px) {
   .rdp { height: 70vh; }
   .desktop-icons { inset: 6px auto 52px 6px; }
+}
+
+/* ── связь: телефон, чат, почта ──────────────────────────── */
+
+.comms {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.dialer {
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: #141a22;
+  padding: 8px;
+}
+
+.dialer h3 {
+  margin: 2px 6px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--faint);
+}
+
+.dial-row {
+  display: grid;
+  width: 100%;
+  gap: 1px;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 2px;
+  color: var(--dim);
+  padding: 6px 7px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dial-row:hover { color: var(--text); background: #1b212a; }
+.dial-row[aria-current="true"] { background: #222a35; color: var(--text); }
+.dial-name { color: inherit; }
+
+.dial-sep {
+  margin: 10px 6px 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.thread { min-width: 0; }
+
+.thread-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 10px;
+}
+
+.feed {
+  max-height: 46vh;
+  min-height: 180px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.line {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.line .who { color: var(--faint); font-size: 11px; padding-top: 2px; }
+.line .what { overflow-wrap: anywhere; }
+
+/*
+  Поле реплики занимает свободную ширину.
+
+  Найдено на скриншоте: поле было узким по умолчанию и обрезало
+  собственную подсказку на «Что вы говорите собес».
+*/
+.thread .bar input[type="text"] { flex: 1; min-width: 0; }
+
+/* реплика техника — своя, помечается линейкой, а не цветом */
+.line.mine .what {
+  border-left: 2px solid var(--line-2);
+  padding-left: 10px;
+  margin-left: -12px;
+}
+
+/*
+  Плашка деградации. Цвет здесь означает суждение — «работает не то,
+  что вы выбрали», — и потому уместен.
+*/
+.degraded {
+  color: var(--warn);
+  border-left: 2px solid var(--warn);
+  padding: 6px 0 6px 10px;
+  margin: 8px 0;
+  max-width: 66ch;
+}
+
+@media (max-width: 900px) {
+  .comms { grid-template-columns: minmax(0, 1fr); }
+  .line { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .line.mine .what { margin-left: 0; }
+}
+
+/* ── настройки ───────────────────────────────────────────── */
+
+.modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 8px;
+  max-width: 80ch;
+}
+
+.mode {
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  background: #1a202a;
+  border: 1px solid var(--line-2);
+  border-radius: 2px;
+  color: var(--dim);
+  padding: 10px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.mode:hover { background: #1f2631; }
+.mode b { color: var(--text); font-size: 12px; font-weight: 600; }
+.mode .sub { line-height: 1.45; }
+
+/* выбранный режим — яркость и линейка слева, как в навигации */
+.mode[aria-current="true"] {
+  background: #232b36;
+  border-left: 2px solid var(--text);
+  color: var(--text);
+}
+
+.kv.wide { grid-template-columns: 110px minmax(0, 1fr); max-width: 72ch; }
+.kv.wide input { width: 100%; }
+
+code {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--sunk);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 0 4px;
 }

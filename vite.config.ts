@@ -1,12 +1,16 @@
 /// <reference types="vitest" />
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import { llmProxy } from './vite.llm-proxy'
 
 export default defineConfig({
-  plugins: [react()],
+  /*
+    Прокси к модели живёт только в dev-сервере: ключ читается из
+    config/llm.local.json — файла вне репозитория — и подставляется
+    заголовком. В собранную страницу он не попадает.
+  */
+  plugins: [react(), llmProxy()],
   server: {
-    // Прокси к модели диалога появится в срезе 4; ключ живёт в локальном
-    // конфиге и никогда не попадает в бандл.
     port: 5173,
   },
   test: {

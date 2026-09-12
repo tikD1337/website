@@ -44,6 +44,14 @@ export interface Communication {
   channel: 'call' | 'chat' | 'mail'
   /** samAccountName либо 'technician' */
   from: string
+  /**
+   * С кем шёл разговор — samAccountName собеседника.
+   *
+   * Не выводится из `from`: реплику техника иначе некому приписать, и
+   * звонок коллеге («а у вас так же?») сливался бы в одну ленту с
+   * разговором заявителя. Лента общения обязана различать, кому звонили.
+   */
+  with: string
   text: string
 }
 

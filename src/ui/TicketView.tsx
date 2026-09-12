@@ -10,6 +10,13 @@ import {
 
 const FIELDS = Object.keys(FIELD_QUESTION) as VerificationField[]
 
+/** Канал реплики: одна лента держит звонки, чат и почту вместе. */
+const CHANNEL_LABEL = {
+  call: 'звонок',
+  chat: 'чат',
+  mail: 'почта',
+} as const
+
 const NOTE_HINT = [
   'Симптом словами заявителя.',
   'Что проверили и что это исключило — включая проверку, которая ничего не дала.',
@@ -29,6 +36,7 @@ export function TicketView() {
   const verifyRequester = useGame(s => s.verifyRequester)
   const confirmWithUser = useGame(s => s.confirmWithUser)
   const askRequesterTo = useGame(s => s.askRequesterTo)
+  const callTo = useGame(s => s.callTo)
   const scenarios = useGame(s => s.scenarios)
   const setTicketStatus = useGame(s => s.setTicketStatus)
   const setTool = useGame(s => s.setTool)
@@ -142,6 +150,19 @@ export function TicketView() {
           Позвонить заявителю
         </button>
 
+        {/*
+          Быстрая кнопка спрашивает одно: «получилось?». Разговор целиком
+          — в инструменте «Связь», где можно задать любой вопрос и
+          позвонить не только заявителю.
+        */}
+        <button
+          className="act"
+          type="button"
+          onClick={() => { callTo(ticket.requester); setTool('comms') }}
+        >
+          Открыть разговор
+        </button>
+
         <button className="act" type="button" onClick={() => setTool('terminal')}>
           Подключиться к машине
         </button>
@@ -188,15 +209,29 @@ export function TicketView() {
       {ticket.communications.length > 0 && (
         <div className="section">
           <h2>Общение с заявителем</h2>
-          {ticket.communications.map((c, i) => (
-            <p key={i} className="prose" style={{ marginBottom: 6 }}>
-              {/* реплики техника подписываются им, а не заявителем */}
-              <span className="sub">
-                {c.from === 'technician' ? 'Вы' : user?.displayName ?? c.from}:{' '}
-              </span>
-              {c.text}
-            </p>
-          ))}
+          {ticket.communications.map((c, i) => {
+            const who = world.org.users.find(u => u.samAccountName === c.with)
+            /*
+              Разговор с коллегой подписывается его именем: звонок
+              «а у вас так же?» — законный приём, и сливать его с
+              репликами заявителя нельзя.
+            */
+            const aside = c.with !== ticket.requester
+              ? ` · ${who?.displayName ?? c.with}`
+              : ''
+
+            return (
+              <p key={i} className="prose" style={{ marginBottom: 6 }}>
+                <span className="sub">
+                  {c.from === 'technician'
+                    ? 'Вы'
+                    : who?.displayName ?? c.from}
+                  {' '}({CHANNEL_LABEL[c.channel]}{aside}):{' '}
+                </span>
+                {c.text}
+              </p>
+            )
+          })}
         </div>
       )}
 
