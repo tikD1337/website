@@ -143,7 +143,7 @@ export const identityAccountLockout: Scenario = {
         'Либо выполнить net user e.varga',
         'Посмотреть состояние и счётчик неудачных входов',
       ],
-      commands: ['net user e.varga'],
+      commands: ['net user e.varga', 'gui:user:e.varga'],
       requires: [],
       why:
         'Сообщение на экране пользователя и состояние в каталоге — разные '

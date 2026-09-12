@@ -189,3 +189,79 @@ describe('связность: членство видно всеми инстр�
     expect(findGroup(s().world, GROUP)!.grantsAccessTo).toContain(SHARE)
   })
 })
+
+/*
+  Работа мышью засчитывается наравне с командой.
+
+  Найдено визуальной проверкой: инцидент пройден правильно — членство
+  смотрел в консоли, как предлагает сам сценарий, — а разбор выдал
+  «закрыто 0 из 2 диагностических целей». Консоль каталога, вокруг
+  которой построен весь срез, для оценки не существовала.
+*/
+describe('доказательство цели: команда или открытая карточка', () => {
+  const play = (s: ReturnType<typeof store>) => {
+    s().addUserToGroup('n.haruna', GROUP)
+    s().askRequesterTo('relogin')
+    s().confirmWithUser()
+    s().saveResolutionNotes(GOOD_NOTE)
+    s().setResolutionCode('solved')
+    s().resolveTicket()
+  }
+
+  it('расследование через консоль закрывает те же цели, что через команды', () => {
+    const viaConsole = store()
+    viaConsole().verifyRequester('manager', 'Dumisani Mbeki')
+    viaConsole().inspectObject('user', 'n.haruna')
+    viaConsole().inspectObject('group', GROUP)
+    play(viaConsole)
+
+    const viaCommands = store()
+    viaCommands().verifyRequester('manager', 'Dumisani Mbeki')
+    viaCommands().runCommand('net user n.haruna')
+    viaCommands().runCommand('dsquery group -name GRP-Finance*')
+    play(viaCommands)
+
+    const ids = (s: ReturnType<typeof store>) =>
+      s().scorecard!.objectives.filter(o => o.met).map(o => o.id)
+
+    expect(ids(viaConsole)).toEqual(ids(viaCommands))
+    expect(viaConsole().scorecard!.verdict).toBe('full')
+  })
+
+  it('расследование засчитано полностью', () => {
+    const s = store()
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    s().inspectObject('user', 'n.haruna')
+    s().inspectObject('group', GROUP)
+    play(s)
+
+    expect(s().scorecard!.dimensions.find(d => d.id === 'investigation')!.score).toBe(10)
+  })
+
+  it('без расследования цели остаются незакрытыми', () => {
+    const s = store()
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    play(s)
+
+    const unmet = s().scorecard!.objectives.filter(o => !o.met).map(o => o.id)
+    expect(unmet).toContain('obj-see-membership')
+    expect(unmet).toContain('obj-find-group')
+  })
+
+  it('открытая карточка другого человека не закрывает цель', () => {
+    const s = store()
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    s().inspectObject('user', 's.okafor')
+    play(s)
+
+    expect(s().scorecard!.objectives.find(o => o.id === 'obj-see-membership')!.met)
+      .toBe(false)
+  })
+
+  it('повторное открытие не дублируется в журнале', () => {
+    const s = store()
+    s().inspectObject('user', 'n.haruna')
+    s().inspectObject('user', 'n.haruna')
+    expect(s().session.inspected.filter(x => x === 'user:n.haruna')).toHaveLength(1)
+  })
+})

@@ -91,6 +91,7 @@ export function DirectoryConsole() {
   const setEnabled = useGame(s => s.setUserEnabled)
   const addGroup = useGame(s => s.addUserToGroup)
   const removeGroup = useGame(s => s.removeUserFromGroup)
+  const inspect = useGame(s => s.inspectObject)
 
   const [ou, setOu] = useState('OU=Sales,OU=Employees,OU=Corp')
   const [selected, setSelected] = useState<string | null>(null)
@@ -151,7 +152,12 @@ export function DirectoryConsole() {
               <tr
                 key={o.kind + o.id}
                 className={selected === o.id ? 'row sel' : 'row'}
-                onClick={() => { setSelected(o.id); setMessage(null) }}
+                onClick={() => {
+                  setSelected(o.id)
+                  setMessage(null)
+                  // Открытая карточка — такая же проверка, как команда.
+                  inspect(o.kind, o.id)
+                }}
               >
                 <td>{o.name}</td>
                 <td className="sub">

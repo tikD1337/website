@@ -77,6 +77,16 @@ export interface SessionLog {
    * его руками.
    */
   askedFor: string[]
+  /**
+   * Объекты, карточки которых техник открывал: `user:n.haruna`,
+   * `group:GRP-Finance-Reports`.
+   *
+   * Работа мышью — такая же проверка, как команда. Цель «посмотреть,
+   * в каких группах состоит заявитель» закрывается и `net user`, и
+   * карточкой в консоли; засчитывать только команду значит наказывать
+   * за использование инструмента, который сам же срез и построил.
+   */
+  inspected: string[]
   commands: CommandEntry[]
   changes: ChangeEntry[]
   dialogue: DialogueEntry[]

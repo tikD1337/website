@@ -57,8 +57,24 @@ export interface GradeArgs {
 function objectiveMet(
   o: Objective, session: SessionLog, ticket: Ticket, world: WorldState,
 ): boolean {
+  /*
+    Доказательства из списка `commands` — это «или», а не «и».
+
+    К одному выводу ведут разные пути: `net user` в терминале и
+    карточка в консоли отвечают на один вопрос. Требовать их все
+    значит наказывать за выбор инструмента. Запись вида
+    `gui:user:n.haruna` засчитывается открытой карточкой — так работа
+    мышью перестаёт быть невидимой для оценки.
+  */
   const ran = new Set(session.commands.map(c => c.cmdline.toLowerCase().trim()))
-  const commandsOk = o.commands.every(c => ran.has(c.toLowerCase().trim()))
+  const seen = new Set(session.inspected.map(x => x.toLowerCase()))
+
+  const evidenceOk = o.commands.length === 0 || o.commands.some(c => {
+    const key = c.toLowerCase().trim()
+    return key.startsWith('gui:')
+      ? seen.has(key.slice(4))
+      : ran.has(key)
+  })
 
   /*
     Состояние мира — доказательство для целей, которые делаются и
@@ -89,7 +105,7 @@ function objectiveMet(
     return flags[req] === true
   })
 
-  return commandsOk && requiresOk && stateOk
+  return evidenceOk && requiresOk && stateOk
 }
 
 /**

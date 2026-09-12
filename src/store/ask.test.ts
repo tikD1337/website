@@ -122,3 +122,63 @@ describe('просьба закрыта, пока причина не выясн
     expect(s().session.askedFor).toContain('clear-phone')
   })
 })
+
+/*
+  Заявитель сообщает то, что видит, и после просьбы тоже.
+
+  Ответ на просьбу был статическим: «вышла и вошла — папка открылась»
+  приходил даже тогда, когда техник попросил войти заново, не добавив
+  в группу. Билет перевыпускался прежним, папка не открывалась — а
+  заявительница всё равно говорила, что всё хорошо. Это тот же дефект,
+  что нашёлся в срезе 2 у подтверждения по телефону: заявитель не
+  оракул и не подтверждает непочиненное.
+*/
+describe('ответ на просьбу зависит от состояния мира', () => {
+  const shareTicket = (s: ReturnType<typeof store>) =>
+    s().queue.tickets.find(t => t.scenarioId === 'identity-share-access')!
+
+  it('без добавления в группу заявительница говорит, что не открылось', () => {
+    const s = store()
+    s().claimTicket(shareTicket(s).number)
+
+    s().askRequesterTo('relogin')
+
+    const said = s().session.dialogue.at(-1)!.text
+    expect(said).toContain('нет разрешений')
+    expect(said).not.toContain('открылась')
+  })
+
+  it('с добавлением в группу — что открылось', () => {
+    const s = store()
+    s().claimTicket(shareTicket(s).number)
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    s().addUserToGroup('n.haruna', 'GRP-Finance-Reports')
+
+    s().askRequesterTo('relogin')
+
+    expect(s().session.dialogue.at(-1)!.text).toContain('открылась')
+  })
+
+  /*
+    Просьба всё равно считается выполненной: техник её задал, и это
+    его действие. Не сработала она потому, что он не сделал главного —
+    и это видно по незакрытой цели, а не по забытой просьбе.
+  */
+  it('просьба зачтена независимо от результата', () => {
+    const s = store()
+    s().claimTicket(shareTicket(s).number)
+    s().askRequesterTo('relogin')
+    expect(s().session.askedFor).toContain('relogin')
+  })
+
+  it('просьба без варианта «не сработало» отвечает как раньше', () => {
+    const s = store()
+    const lockout = s().queue.tickets.find(
+      t => t.scenarioId === 'identity-account-lockout')!
+    s().claimTicket(lockout.number)
+    s().openApp('eventvwr')
+
+    s().askRequesterTo('clear-phone')
+    expect(s().session.dialogue.at(-1)!.text).toContain('удалила и добавила заново')
+  })
+})

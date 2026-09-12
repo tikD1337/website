@@ -94,6 +94,8 @@ export interface GameState {
   addUserToGroup(sam: string, group: string): AccountResult
   removeUserFromGroup(sam: string, group: string): AccountResult
   grantShareAccess(sam: string, sharePath: string): AccountResult
+  /** техник открыл карточку объекта в консоли — это тоже проверка */
+  inspectObject(kind: 'user' | 'group', id: string): void
   /** проверка доступа — только чтение, для окна общих ресурсов */
   checkShareAccess(sam: string, sharePath: string): boolean
 }
@@ -315,15 +317,25 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
       applyInject(st.world, ask.effect)
       if (ask.relogin) relogin(st.world, ask.relogin, clock)
 
+      /*
+        Заявитель сообщает то, что видит. Просьба могла быть выполнена
+        честно и всё равно не помочь — например, войти заново, когда
+        в группу так и не добавили. Условие то же, по которому он
+        подтверждает результат по телефону.
+      */
+      const helped = ask.replyIfBroken === undefined
+        || allHold(st.world, scenario.fixedWhen)
+      const reply = helped ? ask.reply : ask.replyIfBroken!
+
       recordDialogue(st.session, clock, 'call', ticket.requester, 'technician', ask.ask)
-      recordDialogue(st.session, clock, 'call', ticket.requester, 'requester', ask.reply)
+      recordDialogue(st.session, clock, 'call', ticket.requester, 'requester', reply)
 
       if (!st.session.askedFor.includes(askId)) st.session.askedFor.push(askId)
 
       const at = clock.now().toISOString()
       ticket.communications.push(
         { at, channel: 'call', from: 'technician', text: ask.ask },
-        { at, channel: 'call', from: ticket.requester, text: ask.reply },
+        { at, channel: 'call', from: ticket.requester, text: reply },
       )
 
       set({
@@ -470,6 +482,21 @@ export function createGameStore(clock: Clock): UseBoundStore<StoreApi<GameState>
     grantShareAccess(sam, sharePath) {
       return directoryOp(sam, (world, session) =>
         grantDirectAccess(world, sam, sharePath, session, clock))
+    },
+
+    /**
+     * Открытая карточка — доказательство наравне с командой.
+     *
+     * Иначе расследование, проведённое мышью, не засчитывается вовсе:
+     * техник смотрит членство в консоли, а разбор говорит «закрыто 0
+     * из 2 диагностических целей».
+     */
+    inspectObject(kind, id) {
+      const st = get()
+      const key = `${kind}:${id}`.toLowerCase()
+      if (st.session.inspected.includes(key)) return
+      st.session.inspected.push(key)
+      set({ session: { ...st.session } })
     },
 
     checkShareAccess(sam, sharePath) {

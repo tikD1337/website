@@ -6,6 +6,7 @@ import type {
 export function createSession(): SessionLog {
   return {
     askedFor: [],
+    inspected: [],
     commands: [],
     changes: [],
     dialogue: [],
