@@ -44,18 +44,26 @@ beforeEach(() => {
 afterEach(() => install(null))
 
 describe('настройки переживают перезагрузку', () => {
+  /*
+    Значения намеренно отличаются от умолчаний по каждому полю: иначе
+    тест не отличает «загрузили сохранённое» от «вернули умолчание» и
+    проходит даже со сломанной загрузкой.
+  */
   it('режим, адрес и модель сохраняются', () => {
+    const other = 'gemma2:9b'
+    expect(other).not.toBe(defaultConfig().model)
+
     saveConfig({
       ...defaultConfig(),
       mode: 'endpoint',
       baseUrl: '/api/llm',
-      model: 'qwen2.5:14b',
+      model: other,
     })
 
     const loaded = loadConfig()
     expect(loaded.mode).toBe('endpoint')
     expect(loaded.baseUrl).toBe('/api/llm')
-    expect(loaded.model).toBe('qwen2.5:14b')
+    expect(loaded.model).toBe(other)
   })
 
   it('выбор озвучки сохраняется', () => {

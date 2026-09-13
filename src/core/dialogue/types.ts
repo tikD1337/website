@@ -115,11 +115,25 @@ export interface DialogueConfig {
 export const LOCAL_MODEL_URL = 'http://localhost:11434/v1'
 export const PROXY_URL = '/api/llm'
 
+/**
+ * Модель по умолчанию.
+ *
+ * Выбрана под задачу, а не по размеру: собеседник говорит по-русски
+ * одной-двумя фразами и обязан **не** съезжать в помощь техником.
+ * Qwen2.5 держит русский заметно лучше Llama 3.1 того же класса и
+ * устойчивее остаётся в роли; 14B в четырёхбитной квантовке — около
+ * девяти гигабайт, то есть целиком в видеопамяти современной карты.
+ *
+ * Заменяется в настройках одной строкой: модель здесь — значение по
+ * умолчанию, а не требование.
+ */
+export const DEFAULT_MODEL = 'qwen2.5:14b'
+
 export function defaultConfig(): DialogueConfig {
   return {
     mode: 'scripted',
     baseUrl: LOCAL_MODEL_URL,
-    model: 'llama3.1:8b',
+    model: DEFAULT_MODEL,
     apiKey: '',
     timeoutMs: 20_000,
     speak: false,

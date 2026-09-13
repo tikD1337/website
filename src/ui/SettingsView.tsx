@@ -3,7 +3,8 @@ import { useGame } from '../store/useGame'
 import { speechAvailable } from './speech/speak'
 import { listenAvailable } from './speech/listen'
 import {
-  LOCAL_MODEL_URL, PROXY_URL, type DialogueMode, type DialogueConfig,
+  LOCAL_MODEL_URL, PROXY_URL, DEFAULT_MODEL,
+  type DialogueMode, type DialogueConfig,
 } from '../core/dialogue/types'
 
 /**
@@ -28,8 +29,8 @@ const MODES: Array<{ id: DialogueMode; label: string; hint: string }> = [
   {
     id: 'local',
     label: 'Локальная модель',
-    hint: 'Ollama на этой машине. Бесплатно и оффлайн; ключ не нужен. '
-      + 'Запустите ollama serve и укажите имя загруженной модели.',
+    hint: `Ollama на этой машине. Бесплатно и оффлайн; ключ не нужен. `
+      + `Загрузить модель: ollama pull ${DEFAULT_MODEL}`,
   },
   {
     id: 'endpoint',
