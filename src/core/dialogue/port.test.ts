@@ -233,6 +233,49 @@ describe('деградация', () => {
     expect(d.tripped()).toBe(false)
   })
 
+  /*
+    Испорченная реплика — не то же самое, что отказ модели.
+
+    Модель жива, просто эту фразу показывать нельзя: соскользнула на
+    китайский или заговорила голосом ассистента. Отключать её до конца
+    инцидента из-за одной случайности значит лишать техника живого
+    собеседника на ровном месте — следующий ответ мог быть нормальным.
+  */
+  it('негодный ответ не отключает модель', async () => {
+    const fetch = vi.fn(async () => okReply('细节决定成败'))
+    const d = createDialogue({ config: cfg(), fetch: fetch as never })
+
+    const r = await d.reply(req())
+
+    expect(r.source).toBe('scripted')
+    expect(r.notice).toContain('не по-русски')
+    expect(d.tripped()).toBe(false)
+  })
+
+  it('после негодного ответа модель спрашивают снова', async () => {
+    let first = true
+    const fetch = vi.fn(async () => {
+      if (first) { first = false; return okReply('细节决定成败') }
+      return okReply('Сегодня утром, как пришла.')
+    })
+    const d = createDialogue({ config: cfg(), fetch: fetch as never })
+
+    await d.reply(req())
+    const second = await d.reply(req('Что на экране?'))
+
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(second.source).toBe('model')
+    expect(second.text).toBe('Сегодня утром, как пришла.')
+  })
+
+  it('а недоступность — отключает, как и раньше', async () => {
+    const fetch = vi.fn(async () => { throw new Error('нет сети') })
+    const d = createDialogue({ config: cfg(), fetch: fetch as never })
+
+    await d.reply(req())
+    expect(d.tripped()).toBe(true)
+  })
+
   it('смена настроек даёт модели новую попытку', async () => {
     let fail = true
     const fetch = vi.fn(async () => {
@@ -249,6 +292,51 @@ describe('деградация', () => {
     expect(d.tripped()).toBe(false)
 
     const r = await d.reply(req())
+    expect(r.source).toBe('model')
+  })
+})
+
+/**
+ * Проверка результата отвечается миром даже при исправной модели.
+ *
+ * Найдено живой проверкой на Ollama: блокировку сняли, а модель
+ * продолжала твердить «сообщение об ошибке осталось то же самое» —
+ * тянула жалобу по инерции из истории разговора. На экране выходило
+ * противоречие: «всё ещё заблокирована» рядом с галочкой «заявитель
+ * подтвердил».
+ */
+describe('«попробуйте сейчас» модель не отвечает', () => {
+  it('на починенном мире — подтверждение сценария, а не слова модели', async () => {
+    const fetch = vi.fn(async () => okReply('Нет, всё ещё не работает!'))
+    const d = createDialogue({ config: cfg(), fetch: fetch as never })
+
+    const r = await d.reply({
+      ...req('Попробуйте войти сейчас'),
+      brief: { ...brief, problemGone: true },
+    })
+
+    expect(fetch).not.toHaveBeenCalled()
+    expect(r.source).toBe('scripted')
+    expect(r.text).toContain('пустило')
+  })
+
+  it('на сломанном — жалоба сценария, а не вежливость модели', async () => {
+    const fetch = vi.fn(async () => okReply('Да, спасибо, всё прекрасно работает!'))
+    const d = createDialogue({ config: cfg(), fetch: fetch as never })
+
+    const r = await d.reply(req('Проверьте, получилось?'))
+
+    expect(fetch).not.toHaveBeenCalled()
+    expect(r.text).toContain('то же самое')
+  })
+
+  it('остальной разговор по-прежнему ведёт модель', async () => {
+    const fetch = vi.fn(async () => okReply('Утром, как пришла.'))
+    const d = createDialogue({ config: cfg(), fetch: fetch as never })
+
+    const r = await d.reply(req('Когда это началось?'))
+
+    expect(fetch).toHaveBeenCalledTimes(1)
     expect(r.source).toBe('model')
   })
 })

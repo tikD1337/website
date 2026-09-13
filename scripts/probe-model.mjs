@@ -24,6 +24,18 @@ const MODEL = process.argv[2] ?? 'qwen2.5:14b'
 const ENDPOINT = 'http://localhost:11434/v1/chat/completions'
 
 /*
+  Промпт и параметры генерации берутся из кода тренажёра, а не
+  повторяются здесь: копия разошлась бы, и проверяли бы мы не то.
+
+  `prompt.ts` не импортирует ничего исполняемого — только типы, которые
+  esbuild снимает, — поэтому модуль загружается как есть. Файл с
+  импортом соседей так уже не взять: относительные пути внутри `data:`
+  не разрешаются.
+*/
+const { systemPrompt, GENERATION } =
+  await loadModule('../src/core/dialogue/prompt.ts')
+
+/*
   Сценарии читаются как текст и разбираются грубо: скрипт живёт вне
   сборки, тянуть сюда TypeScript-модули значило бы городить транспиляцию
   ради диагностики.
@@ -65,9 +77,8 @@ function personaOf(file) {
  * регулярками я пробовал; на `as const` это ломается, а чинить разбор
  * TypeScript вручную ради диагностики бессмысленно.
  */
-async function loadSystemPrompt() {
-  const file = fileURLToPath(
-    new URL('../src/core/dialogue/prompt.ts', import.meta.url))
+async function loadModule(relPath) {
+  const file = fileURLToPath(new URL(relPath, import.meta.url))
 
   const esbuild = fileURLToPath(new URL(
     process.platform === 'win32'
@@ -85,9 +96,8 @@ async function loadSystemPrompt() {
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
   )
 
-  const mod = await import(
+  return import(
     `data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
-  return mod.systemPrompt
 }
 
 async function ask(system, said) {
@@ -100,8 +110,8 @@ async function ask(system, said) {
         { role: 'system', content: system },
         { role: 'user', content: said },
       ],
-      max_tokens: 160,
-      temperature: 0.7,
+      // Те же параметры, что в тренажёре: иначе проверяем не то.
+      ...GENERATION,
       stream: false,
     }),
   })
@@ -132,7 +142,6 @@ const QUESTIONS = [
 
 console.log(`Модель: ${MODEL}\n${'='.repeat(72)}`)
 
-const systemPrompt = await loadSystemPrompt()
 
 /*
   Сводка нужна, чтобы сравнивать модели, а не разглядывать простыню
@@ -140,7 +149,8 @@ const systemPrompt = await loadSystemPrompt()
   «кажется, отвечает похуже» — нет.
 */
 const stats = {
-  total: 0, clean: 0, foreign: 0, advice: 0, leak: 0, long: 0, times: [],
+  total: 0, clean: 0, foreign: 0, advice: 0, leak: 0, long: 0, echo: 0,
+  times: [],
 }
 
 const median = (xs) => {
@@ -207,11 +217,36 @@ for (const { file, name } of CASES) {
 
     /*
       Срыв на чужой язык. Многоязычная модель тем охотнее уходит в язык
-      обучения, чем длиннее рассуждение: видел китайский посреди
-      русской реплики.
+      обучения, чем длиннее рассуждение: Qwen вставлял китайский,
+      Mistral — французское «locaux programs».
+
+      Латиница ловится только та, которой нет в промпте: имена людей,
+      названия машин и брендов там законны.
     */
     if (/[一-鿿぀-ヿ가-힯]/.test(answer)) {
-      flags.push('СРЫВ НА ЧУЖОЙ ЯЗЫК')
+      flags.push('СРЫВ НА ЧУЖОЙ ЯЗЫК (иероглифы)')
+    } else {
+      const latin = [...new Set(answer.match(/\b[A-Za-z]{4,}\b/g) ?? [])]
+        .filter(w => !system.includes(w))
+      if (latin.length) flags.push(`ЛАТИНИЦА ВНЕ ПРОМПТА: ${latin.join(', ')}`)
+    }
+
+    /*
+      Пересказ инструкций вслух.
+
+      Заявитель, честно перечисляющий «я не знаю, что такое блокировка,
+      и могу удалить учётную запись в почте, если попросят», вываливает
+      технику содержимое системного промпта — включая список того, о
+      чём его стоит попросить. Вреда не меньше, чем от прямой утечки
+      причины, а выглядит правдоподобнее.
+    */
+    const echoed = [...p.doesntKnow, ...p.canDoIfAsked]
+      .filter(item => {
+        const core = item.toLowerCase().split(/\s+/).filter(w => w.length > 4)
+        return core.length >= 2 && core.every(w => low.includes(w.slice(0, 5)))
+      })
+    if (echoed.length) {
+      flags.push(`ПЕРЕСКАЗ ПРОМПТА: «${echoed[0].slice(0, 40)}…»`)
     }
 
     /*
@@ -230,7 +265,10 @@ for (const { file, name } of CASES) {
     stats.total += 1
     stats.times.push(ms)
     if (flags.length === 0) stats.clean += 1
-    if (flags.some(f => f.includes('ЧУЖОЙ ЯЗЫК'))) stats.foreign += 1
+    if (flags.some(f => f.includes('ЧУЖОЙ ЯЗЫК') || f.includes('ЛАТИНИЦА'))) {
+      stats.foreign += 1
+    }
+    if (flags.some(f => f.includes('ПЕРЕСКАЗ'))) stats.echo += 1
     if (flags.some(f => f.includes('СОВЕТ'))) stats.advice += 1
     if (flags.some(f => f.includes('РАЗГАДКИ'))) stats.leak += 1
     if (flags.some(f => f.includes('длинно'))) stats.long += 1
@@ -245,6 +283,7 @@ console.log(`\n${'='.repeat(72)}`)
 console.log(`Модель: ${MODEL}`)
 console.log(`Ответов: ${stats.total}, из них в роли: ${stats.clean}`)
 console.log(`Срывов на чужой язык: ${stats.foreign}`)
+console.log(`Пересказов промпта: ${stats.echo}`)
 console.log(`Советов технику: ${stats.advice}`)
 console.log(`Утечек разгадки: ${stats.leak}`)
 console.log(`Слишком длинных: ${stats.long}`)

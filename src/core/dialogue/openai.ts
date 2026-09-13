@@ -1,4 +1,5 @@
-import { buildMessages } from './prompt'
+import { buildMessages, GENERATION } from './prompt'
+import { sanitizeReply } from './sanitize'
 import type { DialogueConfig, DialogueRequest } from './types'
 
 /**
@@ -29,7 +30,18 @@ export type FetchLike = (
 
 export type ModelResult =
   | { ok: true; text: string }
-  | { ok: false; error: string }
+  /**
+   * Отказ.
+   *
+   * `unusable` различает два совсем разных случая, которые раньше
+   * выглядели одинаково. Модель **недоступна** — связь, таймаут, код
+   * ошибки: пробовать снова смысла нет, размыкатель её отключает.
+   * Модель **ответила негодно** — соскользнула на чужой язык или
+   * заговорила голосом ассистента: она жива, и следующая реплика может
+   * выйти нормальной. Отключать её до конца инцидента из-за одной
+   * испорченной фразы значит наказывать разговор за случайность.
+   */
+  | { ok: false; error: string; unusable?: boolean }
 
 interface ChatChoice {
   message?: { content?: unknown }
@@ -75,10 +87,7 @@ export async function askModel(
       body: JSON.stringify({
         model: cfg.model,
         messages: buildMessages(req),
-        // Заявитель говорит коротко; длинный ответ — признак того, что
-        // модель начала рассуждать вместо того, чтобы отвечать.
-        max_tokens: 160,
-        temperature: 0.7,
+        ...GENERATION,
         stream: false,
       }),
       signal: ctl.signal,
@@ -91,7 +100,19 @@ export async function askModel(
     const text = textFrom(await res.json())
     if (text === null) return { ok: false, error: 'модель вернула пустой ответ' }
 
-    return { ok: true, text }
+    /*
+      Ответ модели проверяется, а не принимается на веру: она может
+      соскользнуть на чужой язык или заговорить голосом ассистента.
+      Негодная реплика — такой же отказ, как обрыв связи, и обрабатывается
+      тем же путём: разговор продолжают заготовки сценария.
+    */
+    const clean = sanitizeReply(text)
+    if (!clean.ok) {
+      // Модель жива — негоден именно этот ответ.
+      return { ok: false, error: clean.reason ?? 'ответ не годится', unusable: true }
+    }
+
+    return { ok: true, text: clean.text }
   } catch (e) {
     const name = (e as { name?: string } | null)?.name
     if (name === 'AbortError') {

@@ -213,18 +213,36 @@ describe('подтверждение через разговор', () => {
   })
 
   /*
-    Модель говорит что угодно — подтверждение всё равно по миру.
-    Это и есть защита от оракула: вежливое «спасибо, всё работает»
-    на сломанной машине не засчитывается.
+    Проверку результата модель не отвечает вовсе — её отвечает мир.
+
+    Сначала защита была мягче: модель говорила что угодно, а флаг
+    ставился по `fixedWhen`. Живая проверка на Ollama показала, чем это
+    плохо: блокировку сняли, флаг встал, а модель по инерции твердила
+    «всё ещё заблокирована» — на экране жалоба рядом с галочкой
+    «подтвердил». Теперь на «попробуйте» отвечает сценарий, и реплика с
+    флагом не расходятся никогда.
   */
-  it('слова модели не подтверждают непочиненное', async () => {
+  it('вежливость модели не подтверждает непочиненное', async () => {
     const s = store(modelSays('Да-да, спасибо, всё прекрасно работает!'))
     s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
     s().callTo('e.varga')
     await s().say('Попробуйте войти сейчас')
 
-    expect(s().session.dialogue.at(-1)!.text).toContain('прекрасно работает')
+    expect(s().session.dialogue.at(-1)!.text).not.toContain('прекрасно работает')
+    expect(s().session.dialogue.at(-1)!.text).toContain('то же самое')
     expect(s().session.flags.userConfirmed).toBe(false)
+  })
+
+  it('на починенном мире реплика и флаг не расходятся', async () => {
+    const s = store(modelSays('Нет, всё ещё не пускает!'))
+    s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    s().unlockUser('e.varga')
+    s().callTo('e.varga')
+    await s().say('Попробуйте войти сейчас')
+
+    expect(s().session.dialogue.at(-1)!.text).toContain('пустило')
+    expect(s().session.flags.userConfirmed).toBe(true)
   })
 
   it('подтверждает только заявитель, а не коллега', async () => {
@@ -364,7 +382,8 @@ describe('состояние ожидания', () => {
     s().unlockUser('e.varga')
     s().callTo('e.varga')
 
-    const pending = s().say('Попробуйте войти сейчас')
+    // Обычный вопрос: проверку результата модель не отвечает вовсе.
+    const pending = s().say('Что сейчас на экране?')
 
     s().saveResolutionNotes('Снял блокировку с e.varga.')
     s().setResolutionCode('solved')
