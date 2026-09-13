@@ -16,9 +16,12 @@
  */
 
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { execFileSync } from 'node:child_process'
 
 const MODEL = process.argv[2] ?? 'qwen2.5:14b'
-const URL = 'http://localhost:11434/v1/chat/completions'
+// Не `URL`: так называется глобальный класс, которым ниже читаются файлы.
+const ENDPOINT = 'http://localhost:11434/v1/chat/completions'
 
 /*
   Сценарии читаются как текст и разбираются грубо: скрипт живёт вне
@@ -51,52 +54,44 @@ function personaOf(file) {
   }
 }
 
-/** Повторяет сборку промпта из src/core/dialogue/prompt.ts. */
-function systemPrompt(p, name, problemGone) {
-  return [
-    `Ты играешь роль сотрудника по имени ${name}.`,
-    '',
-    'Ты обратился в службу поддержки и разговариваешь с техником.',
-    'Ты НЕ технический специалист. Ты не знаешь, из-за чего возникла',
-    'проблема, и не должен предполагать причину, предлагать решения,',
-    'называть команды, службы, драйверы или настройки. Ты описываешь',
-    'только то, что видишь на экране и что чувствуешь.',
-    '',
-    'Правила, которые нельзя нарушать:',
-    '1. Отвечай одной-двумя фразами. Ты человек в разговоре, а не справка.',
-    '2. Никогда не ставь диагноз и не подсказывай технику, что делать.',
-    '3. Если не знаешь ответа — так и скажи: «не знаю», «не разбираюсь».',
-    '4. Не выдумывай факты о системе. Если чего-то нет в списке ниже,',
-    '   значит ты этого не знаешь.',
-    '5. Ты выполняешь просьбы техника, если они тебе по силам, и',
-    '   сообщаешь, что получилось.',
-    '6. Не переходи на технический язык, даже если техник его использует.',
-    '',
-    'Это телефонный разговор: коротко, разговорно, без форматирования.',
-    '',
-    'Твоё обращение в поддержку было таким:',
-    `«${p.description}»`,
-    '',
-    'Что ты знаешь и можешь рассказать:',
-    ...p.knows.map(k => `- ${k}`),
-    '',
-    'Чего ты не знаешь и не понимаешь:',
-    ...p.doesntKnow.map(k => `- ${k}`),
-    '',
-    'Что ты можешь сделать, если попросят:',
-    ...p.canDoIfAsked.map(k => `- ${k}`),
-    '',
-    problemGone
-      ? 'Прямо сейчас проблема, с которой ты обращался, БОЛЬШЕ НЕ ПОВТОРЯЕТСЯ. '
-        + 'Если техник попросит проверить — проверь и подтверди, что заработало.'
-      : 'Прямо сейчас проблема, с которой ты обращался, ВСЁ ЕЩЁ ЕСТЬ. '
-        + 'Если техник попросит проверить — проверь и скажи, что ничего не '
-        + 'изменилось. Не говори, что заработало, пока это не так.',
-  ].join('\n')
+/**
+ * Промпт берётся из настоящего `prompt.ts`, а не переписывается здесь.
+ *
+ * Копия промпта в скрипте разошлась с кодом за один вечер — худший род
+ * дефекта для проверочного инструмента: он показывает, что всё хорошо,
+ * проверив не то, что уходит модели.
+ *
+ * Типы снимает esbuild — он и так стоит вместе с Vite. Снимать их
+ * регулярками я пробовал; на `as const` это ломается, а чинить разбор
+ * TypeScript вручную ради диагностики бессмысленно.
+ */
+async function loadSystemPrompt() {
+  const file = fileURLToPath(
+    new URL('../src/core/dialogue/prompt.ts', import.meta.url))
+
+  const esbuild = fileURLToPath(new URL(
+    process.platform === 'win32'
+      ? '../node_modules/esbuild/bin/esbuild'
+      : '../node_modules/.bin/esbuild',
+    import.meta.url))
+
+  // Через node напрямую: spawn на .cmd под Windows требует shell, а
+  // shell тащит за собой экранирование путей с пробелами.
+  // Загрузчик по расширению esbuild выбирает сам; `--loader` при чтении
+  // из файла он считает ошибкой.
+  const js = execFileSync(
+    process.execPath,
+    [esbuild, file, '--format=esm'],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+  )
+
+  const mod = await import(
+    `data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
+  return mod.systemPrompt
 }
 
 async function ask(system, said) {
-  const res = await fetch(URL, {
+  const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -137,9 +132,44 @@ const QUESTIONS = [
 
 console.log(`Модель: ${MODEL}\n${'='.repeat(72)}`)
 
+const systemPrompt = await loadSystemPrompt()
+
+/*
+  Сводка нужна, чтобы сравнивать модели, а не разглядывать простыню
+  текста: «сорвался на китайский трижды из четырёх» — довод, а
+  «кажется, отвечает похуже» — нет.
+*/
+const stats = {
+  total: 0, clean: 0, foreign: 0, advice: 0, leak: 0, long: 0, times: [],
+}
+
+const median = (xs) => {
+  if (!xs.length) return 0
+  const s = [...xs].sort((a, b) => a - b)
+  return s[Math.floor(s.length / 2)]
+}
+
 for (const { file, name } of CASES) {
   const p = personaOf(file)
-  const system = systemPrompt(p, name, false)
+
+  const system = systemPrompt({
+    channel: 'call',
+    withWhom: name,
+    said: '',
+    history: [],
+    brief: {
+      displayName: name,
+      dept: '',
+      title: '',
+      complaint: p.description,
+      knows: p.knows,
+      doesntKnow: p.doesntKnow,
+      canDoIfAsked: p.canDoIfAsked,
+      scripted: [],
+      problemGone: false,
+      confirmReplies: ['', ''],
+    },
+  })
 
   console.log(`\n### ${file} — ${name}`)
 
@@ -175,10 +205,49 @@ for (const { file, name } of CASES) {
     }
     if (!/[а-яё]/i.test(answer)) flags.push('ответ не по-русски')
 
+    /*
+      Срыв на чужой язык. Многоязычная модель тем охотнее уходит в язык
+      обучения, чем длиннее рассуждение: видел китайский посреди
+      русской реплики.
+    */
+    if (/[一-鿿぀-ヿ가-힯]/.test(answer)) {
+      flags.push('СРЫВ НА ЧУЖОЙ ЯЗЫК')
+    }
+
+    /*
+      Непрошеный совет. Заявитель, предлагающий «выйти и войти снова»,
+      выдаёт половину решения сценария с доступом к папке — и делает
+      это правдоподобно, отчего вред больше, чем от прямой утечки.
+    */
+    const ADVICE = [
+      'стоит попробовать', 'может быть, стоит', 'может, стоит',
+      'советую', 'рекомендую', 'нужно проверить', 'надо проверить',
+      'попробуйте', 'вам стоит',
+    ]
+    const advice = ADVICE.filter(a => low.includes(a))
+    if (advice.length) flags.push(`СОВЕТ ТЕХНИКУ: ${advice.join(', ')}`)
+
+    stats.total += 1
+    stats.times.push(ms)
+    if (flags.length === 0) stats.clean += 1
+    if (flags.some(f => f.includes('ЧУЖОЙ ЯЗЫК'))) stats.foreign += 1
+    if (flags.some(f => f.includes('СОВЕТ'))) stats.advice += 1
+    if (flags.some(f => f.includes('РАЗГАДКИ'))) stats.leak += 1
+    if (flags.some(f => f.includes('длинно'))) stats.long += 1
+
     console.log(flags.length
       ? `  ⚠ ${flags.join(' · ')}   [${ms} мс]`
       : `  ✓ в роли   [${ms} мс]`)
   }
 }
 
-console.log(`\n${'='.repeat(72)}\nГотово. Читайте ответы глазами: придирки выше — подсказка, не вердикт.`)
+console.log(`\n${'='.repeat(72)}`)
+console.log(`Модель: ${MODEL}`)
+console.log(`Ответов: ${stats.total}, из них в роли: ${stats.clean}`)
+console.log(`Срывов на чужой язык: ${stats.foreign}`)
+console.log(`Советов технику: ${stats.advice}`)
+console.log(`Утечек разгадки: ${stats.leak}`)
+console.log(`Слишком длинных: ${stats.long}`)
+console.log(`Медиана ответа: ${median(stats.times)} мс`)
+console.log('\nЧитайте ответы глазами: придирки — подсказка, не вердикт.')
+console.log('Сравнить другую модель: node scripts/probe-model.mjs gemma2:9b')
