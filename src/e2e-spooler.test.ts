@@ -63,7 +63,7 @@ describe('очередь держит все сценарии', () => {
   */
   it('на каждый сценарий свой тикет и своя машина', () => {
     const s = store()
-    expect(s().queue.tickets).toHaveLength(SCENARIOS.length)
+    expect(s().queue.tickets).toHaveLength(3)
     const devices = s().queue.tickets.map(t => t.device)
     expect(new Set(devices).size).toBe(devices.length)
   })

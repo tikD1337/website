@@ -68,7 +68,7 @@ export function loadScenario(s: Scenario): { world: WorldState; ticket: Ticket }
   return { world, ticket: buildTicket(s) }
 }
 
-function buildTicket(s: Scenario): Ticket {
+export function buildTicket(s: Scenario): Ticket {
   return {
     number: incidentNumber(s.id),
     scenarioId: s.id,

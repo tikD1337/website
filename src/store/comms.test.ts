@@ -377,6 +377,10 @@ describe('состояние ожидания', () => {
       }
     }
     const s = store(slow)
+    // Тикет закрывают, пока модель думает: после resolveTicket он уходит
+    // из окна, поэтому ссылку на переписку берём до закрытия.
+    const ticket = s().queue.tickets.find(
+      t => t.scenarioId === 'identity-account-lockout')!
     s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
     s().verifyRequester('manager', 'Dumisani Mbeki')
     s().unlockUser('e.varga')
@@ -394,8 +398,6 @@ describe('состояние ожидания', () => {
     release!()
     await pending
 
-    const ticket = s().queue.tickets.find(
-      t => t.scenarioId === 'identity-account-lockout')!
     expect(ticket.communications.some(c => c.text === 'поздний ответ')).toBe(false)
     // разбор посчитан и остаётся правдой
     expect(s().scorecard!.dimensions.find(d => d.id === 'communication')!.score)

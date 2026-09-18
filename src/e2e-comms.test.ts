@@ -34,6 +34,10 @@ const NOTE =
  */
 describe('инцидент, пройденный разговором', () => {
   const play = async (s: ReturnType<typeof store>) => {
+    // Ссылку на тикет берём до закрытия: завершённый тикет покидает окно.
+    const ticket = s().queue.tickets.find(
+      t => t.scenarioId === 'identity-account-lockout')!
+
     // Связь до любых изменений — доктрина «проговори, потом делай».
     s().callTo('e.varga')
     await s().say('Здравствуйте, это служба поддержки, разбираюсь с вашей заявкой.')
@@ -50,6 +54,7 @@ describe('инцидент, пройденный разговором', () => {
     s().saveResolutionNotes(NOTE)
     s().setResolutionCode('solved')
     s().resolveTicket()
+    return ticket
   }
 
   it('даёт полный вердикт без единой команды в терминале', async () => {
@@ -91,10 +96,8 @@ describe('инцидент, пройденный разговором', () => {
 
   it('вся переписка попала в тикет', async () => {
     const s = store()
-    await play(s)
+    const ticket = await play(s)
 
-    const ticket = s().queue.tickets.find(
-      t => t.scenarioId === 'identity-account-lockout')!
     // три реплики техника, три ответа, плюс просьба и ответ на неё
     expect(ticket.communications.length).toBeGreaterThanOrEqual(8)
     expect(ticket.communications.every(c => c.with === 'e.varga')).toBe(true)

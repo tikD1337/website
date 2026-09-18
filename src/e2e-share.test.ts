@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { createGameStore } from './store/useGame'
 import { findUser, findGroup, hasShareAccess } from './core/directory/accounts'
+import { SCENARIOS } from './scenarios'
 
 const clock = { now: () => new Date('2026-09-11T10:15:00.000Z') }
 
@@ -8,7 +9,7 @@ const SHARE = '\\\\fileserver.arcline.corp\\Finance-Reports'
 const GROUP = 'GRP-Finance-Reports'
 
 const store = () => {
-  const g = createGameStore(clock)
+  const g = createGameStore(clock, undefined, SCENARIOS.length)
   g.getState().start()
   const s = () => g.getState()
   const ticket = s().queue.tickets.find(t => t.scenarioId === 'identity-share-access')!

@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createGameStore } from './useGame'
 import { findUser } from '../core/directory/accounts'
+import { SCENARIOS } from '../scenarios'
 
 const clock = { now: () => new Date('2026-09-10T11:00:00.000Z') }
 
 const store = () => {
-  const g = createGameStore(clock)
+  const g = createGameStore(clock, undefined, SCENARIOS.length)
   g.getState().start()
   return () => g.getState()
 }

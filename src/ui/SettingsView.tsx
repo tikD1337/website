@@ -46,8 +46,17 @@ export function SettingsView() {
   const probe = useGame(s => s.probeResult)
   const setConfig = useGame(s => s.setDialogueConfig)
   const probeModel = useGame(s => s.probeModel)
+  const records = useGame(s => s.progress.records)
+  const wipeProgress = useGame(s => s.wipeProgress)
 
   const [checking, setChecking] = useState(false)
+  /*
+    Сброс прогресса необратим, поэтому спрашивается дважды. Вторым
+    нажатием подтверждается ровно то действие, которое названо на
+    кнопке, — окна подтверждения браузера здесь нет намеренно: оно
+    выглядит как чужое и его закрывают не глядя.
+  */
+  const [confirmWipe, setConfirmWipe] = useState(false)
 
   const patch = (p: Partial<DialogueConfig>) => setConfig({ ...config, ...p })
 
@@ -204,6 +213,55 @@ export function SettingsView() {
               + 'но набирать текст можно всегда.'
             : 'Распознавание речи недоступно — ввод только текстом.'}
         </p>
+      </div>
+
+      <div className="section">
+        <h2>Прогресс</h2>
+
+        <p className="sub">
+          Закрытых тикетов в истории: {records.length}. «Пройти заново»
+          начинает новую смену и прогресс не трогает — стирает только эта
+          кнопка, и восстановить стёртое нельзя.
+        </p>
+
+        {/*
+          Отмена стоит первой, и это не вкусовщина.
+
+          Подтверждение появляется на месте кнопки, которую только что
+          нажали: React переиспользует узел, курсор остаётся там же, а
+          фокус переходит на первую кнопку. Поставь «стереть» первой —
+          и двойной клик по инерции сотрёт историю, не дав прочитать
+          вопрос. Под курсором обязано оставаться безопасное действие.
+        */}
+        <div className="bar">
+          {confirmWipe ? (
+            <>
+              <button
+                className="act primary"
+                type="button"
+                onClick={() => setConfirmWipe(false)}
+              >
+                Отмена
+              </button>
+              <button
+                className="act"
+                type="button"
+                onClick={() => { void wipeProgress(); setConfirmWipe(false) }}
+              >
+                Да, стереть навсегда
+              </button>
+            </>
+          ) : (
+            <button
+              className="act"
+              type="button"
+              disabled={records.length === 0}
+              onClick={() => setConfirmWipe(true)}
+            >
+              Сбросить прогресс
+            </button>
+          )}
+        </div>
       </div>
     </>
   )

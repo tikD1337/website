@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createGameStore } from './useGame'
 
 let g: ReturnType<typeof createGameStore>
@@ -132,5 +132,124 @@ describe('сброс', () => {
     expect(s().queue.assigned).toBeNull()
     expect(s().session.commands).toHaveLength(0)
     expect(s().world.devices['AL-LPT-0447']!.adapters[0]!.ip).toBe('169.254.23.11')
+  })
+})
+
+/**
+ * Прогрессия.
+ *
+ * `resolveTicket` — единственная точка записи прохождения, и запись
+ * обязана быть в памяти сразу: следующее закрытие читает историю из
+ * стора, и отложенная запись затёрла бы предыдущую.
+ */
+describe('прогресс', () => {
+  const close = () => {
+    s().claimTicket(firstNumber())
+    s().runCommand('ipconfig /release')
+    s().runCommand('ipconfig /renew')
+    s().confirmWithUser()
+    s().saveResolutionNotes('Не открывались сайты. ipconfig /all показал '
+      + '169.254.23.11 без шлюза. После release и renew адрес стал '
+      + '10.20.14.88. Заявительница подтвердила.')
+    s().setResolutionCode('solved')
+    s().resolveTicket()
+  }
+
+  it('закрытие пишет запись сразу, не дожидаясь хранилища', () => {
+    close()
+    expect(s().progress.records).toHaveLength(1)
+  })
+
+  it('второе закрытие не затирает первое', () => {
+    close()
+    const second = s().queue.tickets.find(t => t.status !== 'completed')!
+    s().claimTicket(second.number)
+    s().saveResolutionNotes('Разбирался, причину не нашёл.')
+    s().setResolutionCode('solved')
+    s().resolveTicket()
+
+    expect(s().progress.records).toHaveLength(2)
+    expect(s().progress.records[0]!.id).not.toBe(s().progress.records[1]!.id)
+  })
+
+  it('«пройти заново» прогресс не трогает', () => {
+    close()
+    s().reset()
+    expect(s().progress.records).toHaveLength(1)
+  })
+
+  /*
+    Смена нумеруется от старта стора, а страницу перезагружают. Без
+    отметки времени первая смена нового запуска получала бы тот же
+    `shiftId`, что и первая смена прошлого, — и запись о втором
+    прохождении того же сценария сталкивалась бы с записью о первом
+    по идентификатору.
+  */
+  it('смены разных запусков различаются', () => {
+    const other = createGameStore({ now: () => new Date('2026-09-10T08:00:00.000Z') })
+    other.getState().start()
+    expect(other.getState().shiftId).not.toBe(s().shiftId)
+  })
+
+  it('смены одного запуска различаются', () => {
+    const first = s().shiftId
+    s().reset()
+    expect(s().shiftId).not.toBe(first)
+  })
+})
+
+/**
+ * Гидратация не зависит от `start()`.
+ *
+ * Найдено визуальной проверкой: экраны истории и профиля показывали
+ * «Загружается…» навсегда. Интерфейс `start()` не вызывает — стор
+ * собирает смену сам при создании, — а гидратация висела именно на
+ * нём, и `progressLoaded` не вставал никогда. Все тесты при этом были
+ * зелёные, потому что каждый звал `start()` руками.
+ */
+describe('гидратация', () => {
+  it('идёт от создания стора, а не от start()', async () => {
+    const g2 = createGameStore({ now: () => new Date('2026-09-09T18:00:00.000Z') })
+    // start() намеренно не вызываем — интерфейс его не вызывает тоже.
+    await vi.waitFor(() => expect(g2.getState().progressLoaded).toBe(true))
+  })
+})
+
+/**
+ * Исчерпание пула.
+ *
+ * Найдено визуальной проверкой: закрыв все сценарии, техник видел
+ * пустую таблицу и «Открытых: 0» — и ничего больше. План среза
+ * требует обратного: молчаливое «очередь пуста и больше не будет»
+ * читается как поломка, поэтому смена обязана сказать, что кончилась.
+ */
+describe('пул исчерпан', () => {
+  const closeOne = () => {
+    const open = s().queue.tickets.find(t => t.status !== 'completed')
+    if (!open) return false
+    s().claimTicket(open.number)
+    s().saveResolutionNotes('Закрыл по итогам смены.')
+    s().setResolutionCode('solved')
+    s().resolveTicket()
+    return true
+  }
+
+  it('пока в пуле есть сценарии, смена не объявлена оконченной', () => {
+    expect(s().shiftExhausted).toBe(false)
+    closeOne()
+    expect(s().shiftExhausted).toBe(false)
+  })
+
+  it('после последнего сценария смена объявлена оконченной', () => {
+    while (closeOne()) { /* закрываем, пока есть что */ }
+    expect(s().queue.tickets).toHaveLength(0)
+    expect(s().shiftExhausted).toBe(true)
+  })
+
+  it('новая смена снова полна', () => {
+    while (closeOne()) { /* до конца пула */ }
+    s().reset()
+    expect(s().shiftExhausted).toBe(false)
+    expect(s().queue.tickets.length).toBeGreaterThan(0)
   })
 })

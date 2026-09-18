@@ -1,42 +1,20 @@
 import { useGame } from '../store/useGame'
 import { withPlural } from './plural'
 import { scenarioFor } from '../scenarios'
+import { VERDICT, mark } from './verdict'
+import { formatDateTime } from './dates'
 import type { Scorecard } from '../core/grading/grade'
 
-const VERDICT: Record<Scorecard['verdict'], string> = {
-  full: 'Зачтено полностью',
-  partial: 'Зачтено частично',
-  fail: 'Не зачтено',
-}
-
-function mark(score: number): string {
-  return score >= 8 ? 'high' : score >= 4 ? 'mid' : 'low'
-}
-
-export function ScorecardView() {
-  const card = useGame(s => s.scorecard)
-  const scoredId = useGame(s => s.scoredScenarioId)
-  const reset = useGame(s => s.reset)
-
-  if (!card) {
-    return (
-      <div className="head">
-        <h1>Разбор</h1>
-        <p>Появится после закрытия инцидента.</p>
-      </div>
-    )
-  }
-
+/**
+ * Тело разбора: всё, что рисуется из `Scorecard`, независимо от того,
+ * чей это разбор — свежий или из истории.
+ *
+ * Одно и то же описание экрана не должно существовать в двух местах:
+ * запись истории несёт `Scorecard` целиком, и рендерится он здесь же.
+ */
+function CardBody({ card }: { card: Scorecard }) {
   return (
     <>
-      <div className="head">
-        <h1>Разбор инцидента</h1>
-        <p className={`verdict ${card.verdict}`}>
-          <b>{VERDICT[card.verdict]}</b>
-          <span>{withPlural(card.points, 'очко', 'очка', 'очков')}</span>
-        </p>
-      </div>
-
       {card.silentFaults.length > 0 && (
         <div className="section">
           <h2>После вас осталась поломка</h2>
@@ -90,16 +68,75 @@ export function ScorecardView() {
           </div>
         ))}
       </div>
+    </>
+  )
+}
+
+export function ScorecardView() {
+  const card = useGame(s => s.scorecard)
+  const scoredId = useGame(s => s.scoredScenarioId)
+  const viewing = useGame(s => s.viewing)
+  const closeViewing = useGame(s => s.closeViewing)
+  const setTool = useGame(s => s.setTool)
+  const reset = useGame(s => s.reset)
+
+  // Разбор из истории подменяет свежий: это то же самое прохождение,
+  // открытое задним числом, а не второй экран.
+  const shown = viewing ? viewing.card : card
+  const scenarioId = viewing ? viewing.scenarioId : scoredId
+
+  if (!shown) {
+    return (
+      <div className="head">
+        <h1>Разбор</h1>
+        <p>Появится после закрытия инцидента.</p>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <div className="head">
+        <h1>{viewing ? `Разбор прохождения ${viewing.number}` : 'Разбор инцидента'}</h1>
+        {viewing && (
+          <p className="sub">
+            {formatDateTime(viewing.at)} · {viewing.requester} · {viewing.device}
+          </p>
+        )}
+        <p className={`verdict ${shown.verdict}`}>
+          <b>{VERDICT[shown.verdict]}</b>
+          <span>{withPlural(shown.points, 'очко', 'очка', 'очков')}</span>
+        </p>
+      </div>
+
+      <CardBody card={shown} />
+
+      {viewing && (
+        <div className="section">
+          <h2>Заметка к тикету</h2>
+          <p className="prose">{viewing.resolutionNotes || '—'}</p>
+        </div>
+      )}
 
       <div className="section">
         <h2>Что это было на самом деле</h2>
-        <p className="prose">{scoredId ? scenarioFor(scoredId).rootCause : ''}</p>
+        <p className="prose">{scenarioId ? scenarioFor(scenarioId).rootCause : ''}</p>
       </div>
 
       <div className="bar">
-        <button className="act primary" type="button" onClick={reset}>
-          Пройти заново
-        </button>
+        {viewing ? (
+          <button
+            className="act"
+            type="button"
+            onClick={() => { closeViewing(); setTool('history') }}
+          >
+            Назад к истории
+          </button>
+        ) : (
+          <button className="act primary" type="button" onClick={reset}>
+            Пройти заново
+          </button>
+        )}
       </div>
     </>
   )

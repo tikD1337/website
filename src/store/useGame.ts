@@ -3,7 +3,12 @@ import { loadScenarios } from '../core/scenario/load'
 import { allHold } from '../core/scenario/check'
 import { applyInject } from '../core/world/world'
 import { SCENARIOS, scenarioFor } from '../scenarios'
-import { createQueue, claim, setStatus, resolve, findTicket } from '../core/tickets/queue'
+import {
+  createQueue, claim, setStatus, resolve, findTicket,
+} from '../core/tickets/queue'
+import {
+  createQueueGenerator, fillQueue, SHIFT_WINDOW,
+} from '../core/tickets/generate'
 import { createSession, setFlag, recordDialogue } from '../core/session/session'
 import { createRegistry } from '../core/terminal/registry'
 import { ipconfig } from '../core/terminal/commands/ipconfig'
@@ -45,10 +50,16 @@ import type { QueueState } from '../core/tickets/queue'
 import type { WorkflowStatus, ResolutionCode } from '../core/tickets/types'
 import type { Scenario } from '../core/scenario/types'
 import type { ServiceStartType } from '../core/world/types'
+import type { Progress, TicketRecord } from '../core/progress/types'
+import { emptyProgress } from '../core/progress/types'
+import { recordOf } from '../core/progress/record'
+import {
+  loadProgress, saveProgress, clearProgress,
+} from '../core/progress/db'
 
 export type Tool =
   | 'queue' | 'ticket' | 'terminal' | 'directory' | 'comms'
-  | 'settings' | 'scorecard'
+  | 'settings' | 'scorecard' | 'history' | 'profile'
 
 export interface TerminalLine {
   kind: 'prompt' | 'output' | 'notice'
@@ -66,7 +77,7 @@ export interface GameState {
   /** сценарий закрытого тикета — разбор показывает его корневую причину */
   scoredScenarioId: string | null
   windows: WindowsState
-  /** время симуляции — часы трея берут его отсюда, а не из Date.now() */
+  /** время симуляции — часы трея берут его отссюда, а не из Date.now() */
   now: Date
 
   /** канал общения: звонок, чат или почта */
@@ -85,6 +96,30 @@ export interface GameState {
   dialogueConfig: DialogueConfig
   /** результат последней проверки соединения из экрана настроек */
   probeResult: { ok: boolean; error?: string } | null
+
+  /**
+   * Прогресс, переживший перезагрузку.
+   *
+   * История прохождений, из которой выводятся очки, ранг, счётчики и
+   * профиль. Загружается из IndexedDB асинхронно при старте; до
+   * загрузки — пуст, и экран профиля это переживает.
+   */
+  progress: Progress
+  /** гидратация из хранилища закончилась — счётчики можно показывать */
+  progressLoaded: boolean
+  /** id текущей смены; переживает reset, чтобы закрытия нумеровались */
+  shiftId: string
+  /** разбор чужого прохождения, открытого из истории; null — свой */
+  viewing: TicketRecord | null
+  /**
+   * Пул кончился: новых тикетов в этой смене не будет.
+   *
+   * Отдельный флаг, а не пустая очередь: «тикетов нет» и «тикетов
+   * больше не будет» — разные состояния, и второе обязано быть
+   * названо словами. Молчаливо опустевшая очередь читается как
+   * поломка.
+   */
+  shiftExhausted: boolean
 
   start(): void
   reset(): void
@@ -132,6 +167,15 @@ export interface GameState {
   inspectObject(kind: 'user' | 'group', id: string): void
   /** проверка доступа — только чтение, для окна общих ресурсов */
   checkShareAccess(sam: string, sharePath: string): boolean
+
+  /** скрыть тикет из очереди: экземпляр вернётся в пул, штрафа нет */
+  hideTicket(number: string): void
+  /** открыть разбор чужого прохождения из истории */
+  viewRecord(r: TicketRecord): void
+  /** закрыть чужой разбор, вернуться к своему */
+  closeViewing(): void
+  /** стереть прогресс: необратимо, живёт в настройках, а не в reset */
+  wipeProgress(): void
 }
 
 const banner = (): TerminalLine[] => [
@@ -143,6 +187,7 @@ const banner = (): TerminalLine[] => [
 export function createGameStore(
   clock: Clock,
   dialogueDeps?: { fetch?: Parameters<typeof createDialogue>[0]['fetch'] },
+  shiftWindow = SHIFT_WINDOW,
 ): UseBoundStore<StoreApi<GameState>> {
   const registry = createRegistry()
   registry.register('ipconfig', ipconfig)
@@ -164,11 +209,37 @@ export function createGameStore(
     ...(dialogueDeps?.fetch ? { fetch: dialogueDeps.fetch } : {}),
   })
 
+  /*
+    Генератор очереди — окно смены, а не вся библиотека. Создаётся один
+    раз на стор и переживает reset: пул и закрытые тикеты — состояние
+    смены, а reset начинает новую смену с тем же генератором. Прогресс
+    (история прохождений) сюда не попадает — он переживает смену.
+  */
+  const generator = createQueueGenerator(SCENARIOS.map(s => s.id), shiftWindow)
+  let shiftCounter = 0
+
   const fresh = () => {
-    const { world, tickets } = loadScenarios(SCENARIOS)
+    const { world } = loadScenarios(SCENARIOS)
+    shiftCounter++
+    /*
+      Смена помечается временем начала, а не одним лишь счётчиком.
+
+      Счётчик живёт в памяти стора и после перезагрузки начинается
+      заново, поэтому первая смена нового запуска называлась бы `SH-1`
+      — как и первая смена прошлого. Идентификатор записи строится из
+      смены и номера тикета, и второе прохождение того же сценария
+      сталкивалось бы с первым: одинаковый id в истории, один ключ на
+      две строки. Время берётся из инжектируемых часов, как и везде.
+    */
+    const stamp = clock.now().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)
+    const shiftId = `SH-${stamp}-${shiftCounter}`
+    generator.tickets = []
+    generator.pool = SCENARIOS.map(s => s.id)
+    generator.exhausted = false
+    fillQueue(generator, SCENARIOS)
     return {
       world,
-      queue: createQueue(tickets),
+      queue: createQueue(generator.tickets),
       session: createSession(),
       scenarios: SCENARIOS,
       activeTool: 'queue' as Tool,
@@ -183,10 +254,53 @@ export function createGameStore(
       dialogueNotice: null,
       dialogueConfig: dialogue.config(),
       probeResult: null,
+      shiftId,
+      viewing: null,
+      shiftExhausted: generator.exhausted,
+      progress: emptyProgress(),
+      progressLoaded: false,
     }
   }
 
-  return create<GameState>((set, get) => {
+  /*
+    Прогресс — состояние смены, а не инцидента. Загружается один раз
+    при старте, до первого действия: хранилище асинхронное, и первый
+    кадр рисуется без прогресса. Счётчики в рейле не показываются, пока
+    не загружены; экран профиля это переживает.
+  */
+  let progressLoaded = false
+  let progressPromise: Promise<void> | null = null
+  function hydrateProgress(
+    set: (p: Partial<GameState>) => void,
+    get: () => GameState,
+  ): void {
+    if (progressLoaded || progressPromise) return
+
+    /*
+      Загруженное дописывается перед накопленным, а не заменяет его.
+
+      Присвоение затирало бы прохождение, закрытое до конца гидратации.
+      Случай не умозрительный: в приватном окне хранилище отвечает
+      отказом, и ветка `catch` подставляла бы пустой прогресс поверх
+      уже записанного. Загруженные записи старше по определению —
+      отсюда порядок.
+    */
+    const merge = (loaded: Progress) => {
+      progressLoaded = true
+      progressPromise = null
+      const inMemory = get().progress.records
+      set({
+        progress: { ...loaded, records: [...loaded.records, ...inMemory] },
+        progressLoaded: true,
+      })
+    }
+
+    progressPromise = loadProgress()
+      .then(merge)
+      .catch(() => merge(emptyProgress()))
+  }
+
+  const store = create<GameState>((set, get) => {
     /**
      * Общая обвязка операций над каталогом.
      *
@@ -209,12 +323,21 @@ export function createGameStore(
     return {
     ...fresh(),
 
+    /*
+      `start` и `reset` делают одно и то же — начинают смену, — и
+      различаются только тем, кто зовёт: первый вызывается явно,
+      второй кнопкой «Пройти заново». Прогресс не трогает ни тот, ни
+      другой: он переживает смену, и загружается один раз при создании
+      стора, ниже.
+    */
     start() {
-      set(fresh())
+      const { progress, progressLoaded } = get()
+      set({ ...fresh(), progress, progressLoaded })
     },
 
     reset() {
-      set(fresh())
+      const { progress, progressLoaded } = get()
+      set({ ...fresh(), progress, progressLoaded })
     },
 
     setTool(t) {
@@ -763,15 +886,91 @@ export function createGameStore(
         scenario: scenarioFor(ticket.scenarioId),
       })
 
+      fillQueue(generator, SCENARIOS)
+
+      /*
+        Единственная точка записи прохождения: после оценки, после
+        закрытия.
+
+        История правится синхронно, а в IndexedDB уезжает следом. Не
+        наоборот: пока идёт `await`, стор отвечает старым `progress`, и
+        второе закрытие, прочитав его, затёрло бы первую запись. Сама
+        запись при этом не блокирует интерфейс, а её отказ ничего не
+        ломает — история уже в памяти, потеряется лишь то, что не
+        переживёт перезагрузку.
+      */
+      const record = recordOf({
+        card: scorecard,
+        ticket,
+        shiftId: st.shiftId,
+        clock,
+      })
+      const progress = {
+        ...st.progress,
+        records: [...st.progress.records, record],
+      }
+
       set({
-        queue: { ...st.queue },
+        queue: createQueue(generator.tickets),
         scorecard,
         scoredScenarioId: ticket.scenarioId,
         activeTool: 'scorecard',
+        progress,
+        shiftExhausted: generator.exhausted,
       })
+
+      void saveProgress(progress).catch(() => {
+        // Хранилище недоступно — тренировка продолжается.
+      })
+    },
+
+    hideTicket(number) {
+      const st = get()
+      const q = { ...st.queue }
+      const t = findTicket(q, number)
+      if (t.status === 'completed') return
+      // Возвращаем в пул — без штрафа, это отложенное дело.
+      generator.pool.push(t.scenarioId)
+      generator.tickets = q.tickets.filter(x => x.number !== number)
+      fillQueue(generator, SCENARIOS)
+      const next = {
+        queue: createQueue(generator.tickets),
+        shiftExhausted: generator.exhausted,
+      }
+      if (q.assigned === number) set({ ...next, activeTool: 'queue' })
+      else set(next)
+    },
+
+    viewRecord(r: TicketRecord) {
+      set({ viewing: r, activeTool: 'scorecard' })
+    },
+
+    closeViewing() {
+      set({ viewing: null })
+    },
+
+    async wipeProgress() {
+      try {
+        await clearProgress()
+        set({ progress: emptyProgress() })
+      } catch {
+        set({ progress: emptyProgress() })
+      }
     },
     }
   })
+
+  /*
+    Гидратация — при создании стора, а не в `start`.
+
+    Найдено визуальной проверкой: интерфейс `start` не вызывает вовсе,
+    смену собирает сам инициализатор, — и экраны истории и профиля
+    показывали «Загружается…» вечно. Тесты этого не видели: каждый звал
+    `start` руками.
+  */
+  hydrateProgress(store.setState, store.getState)
+
+  return store
 }
 
 export const useGame = createGameStore({ now: () => new Date() })

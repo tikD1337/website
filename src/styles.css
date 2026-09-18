@@ -265,6 +265,23 @@ tr.row:hover td { background: #1b212a; }
 tr.row.done { color: var(--faint); cursor: default; }
 tr.row.done:hover td { background: none; }
 
+/*
+  Проседающее измерение в профиле — это суждение, поэтому цвет уместен.
+  Строка не кликабельна, отсюда собственный класс, а не `tr.row`.
+*/
+tr.weak td:first-child { border-left: 2px solid var(--warn); padding-left: 10px; }
+
+/* просадка против лучшего результата — тоже суждение */
+td.drop { color: var(--bad); }
+
+/* вердикт в списке истории — та же легенда цвета, что и в разборе */
+.verdict-word { font-weight: 600; }
+.verdict-word.full { color: var(--ok); }
+.verdict-word.partial { color: var(--warn); }
+.verdict-word.fail { color: var(--bad); }
+
+.fault-mark { color: var(--bad); }
+
 .sub { color: var(--faint); font-size: 11px; }
 
 /* приоритет — суждение о срочности, поэтому цвет уместен */
@@ -381,6 +398,21 @@ textarea::placeholder { color: var(--faint); }
 .verdict.full b { color: var(--ok); }
 .verdict.partial b { color: var(--warn); }
 .verdict.fail b { color: var(--bad); }
+
+/*
+  Ранг в профиле набран тем же строем, что и вердикт: крупное слово,
+  приглушённая цифра рядом. Цвета здесь нет намеренно — ранг это не
+  суждение о прохождении, а накопленный итог.
+*/
+.rank {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-family: var(--mono);
+}
+
+.rank b { font-size: 22px; font-weight: 600; }
+.rank span { color: var(--dim); font-size: 13px; }
 
 .row-score {
   display: grid;
