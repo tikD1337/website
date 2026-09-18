@@ -10,6 +10,7 @@ beforeEach(() => {
 })
 
 const firstNumber = () => s().queue.tickets[0]!.number
+const findOpen = (n: string) => s().queue.tickets.find(t => t.number === n)!
 
 describe('старт', () => {
   it('очередь непустая, тикет не назначен', () => {
@@ -251,5 +252,192 @@ describe('пул исчерпан', () => {
     s().reset()
     expect(s().shiftExhausted).toBe(false)
     expect(s().queue.tickets.length).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * Изоляция инцидентов.
+ *
+ * Журнал сессии — вход для всей оценки, и он относится к инциденту, а
+ * не к смене. До среза 5 смена состояла из одного тикета, и утечка не
+ * была видна; теперь тикетов подряд несколько, и подтверждение,
+ * полученное у одного заявителя, засчитывалось второму.
+ *
+ * Мир при этом остаётся общим намеренно: последствия работы, включая
+ * тихие поломки, переживают инцидент — это и делает их тихими.
+ */
+describe('изоляция инцидентов', () => {
+  const closeCurrent = () => {
+    s().saveResolutionNotes('Закрыл по итогам смены.')
+    s().setResolutionCode('solved')
+    s().resolveTicket()
+  }
+
+  const nextOpen = () =>
+    s().queue.tickets.find(t => t.status !== 'completed')!
+
+  it('подтверждение заявителя не переходит на следующий тикет', () => {
+    s().claimTicket(firstNumber())
+    // Заявитель не оракул: подтверждает он только починенное.
+    s().runCommand('ipconfig /release')
+    s().runCommand('ipconfig /renew')
+    s().confirmWithUser()
+    expect(s().session.flags.userConfirmed).toBe(true)
+    closeCurrent()
+
+    s().claimTicket(nextOpen().number)
+    expect(s().session.flags.userConfirmed).toBe(false)
+  })
+
+  it('сверка личности не переходит на следующий тикет', () => {
+    s().claimTicket(firstNumber())
+    s().verifyRequester('manager', 'Elena Varga')
+    expect(s().session.flags.identityVerified).toBe(true)
+    closeCurrent()
+
+    s().claimTicket(nextOpen().number)
+    expect(s().session.flags.identityVerified).toBe(false)
+    expect(s().session.verifiedAccount).toBeUndefined()
+  })
+
+  it('команды прошлого инцидента не засчитываются следующему', () => {
+    s().claimTicket(firstNumber())
+    s().runCommand('ipconfig /all')
+    s().runCommand('ipconfig /release')
+    expect(s().session.commands).toHaveLength(2)
+    closeCurrent()
+
+    s().claimTicket(nextOpen().number)
+    expect(s().session.commands).toHaveLength(0)
+    expect(s().session.changes).toHaveLength(0)
+  })
+
+  it('разговор прошлого инцидента не тянется в следующий', () => {
+    s().claimTicket(firstNumber())
+    s().callTo('p.raman')
+    expect(s().talkingTo).toBe('p.raman')
+    closeCurrent()
+
+    s().claimTicket(nextOpen().number)
+    expect(s().talkingTo).toBeNull()
+    expect(s().session.dialogue).toHaveLength(0)
+  })
+
+  it('вывод терминала прошлой машины не остаётся на экране', () => {
+    s().claimTicket(firstNumber())
+    s().runCommand('ipconfig /all')
+    expect(s().terminalLines.some(l => l.text.includes('169.254'))).toBe(true)
+    closeCurrent()
+
+    s().claimTicket(nextOpen().number)
+    expect(s().terminalLines.some(l => l.text.includes('169.254'))).toBe(false)
+  })
+
+  /*
+    Возврат к своему же тикету — не новый инцидент. Сессию здесь
+    сбрасывать нельзя: это стёрло бы всю работу по нему, что хуже
+    утечки, которую чиним.
+  */
+  it('повторное открытие своего тикета журнал не стирает', () => {
+    const n = firstNumber()
+    s().claimTicket(n)
+    s().runCommand('ipconfig /all')
+    s().setTool('queue')
+    s().claimTicket(n)
+
+    expect(s().session.commands).toHaveLength(1)
+  })
+
+  it('повторное открытие своего тикета не сбрасывает рабочий статус', () => {
+    const n = firstNumber()
+    s().claimTicket(n)
+    s().setTicketStatus('pending-user')
+    s().claimTicket(n)
+
+    expect(findOpen(n).status).toBe('pending-user')
+  })
+})
+
+/**
+ * Разбор из истории не подменяет свежий.
+ *
+ * `viewing` живёт, пока техник смотрит прошлое прохождение. Уйти из
+ * него можно не только кнопкой «Назад к истории», но и любым другим
+ * инструментом — и тогда закрытый следом тикет показывал чужой разбор
+ * вместо своего.
+ */
+describe('просмотр прошлого прохождения', () => {
+  it('закрытие тикета снимает просмотр истории', () => {
+    s().claimTicket(firstNumber())
+    s().saveResolutionNotes('Первый инцидент смены.')
+    s().setResolutionCode('solved')
+    s().resolveTicket()
+
+    const record = s().progress.records[0]!
+    s().viewRecord(record)
+    expect(s().viewing).not.toBeNull()
+
+    const next = s().queue.tickets.find(t => t.status !== 'completed')!
+    s().claimTicket(next.number)
+    s().saveResolutionNotes('Второй инцидент смены.')
+    s().setResolutionCode('solved')
+    s().resolveTicket()
+
+    expect(s().viewing).toBeNull()
+  })
+
+  it('взятие тикета тоже снимает просмотр истории', () => {
+    s().claimTicket(firstNumber())
+    s().saveResolutionNotes('Первый инцидент смены.')
+    s().setResolutionCode('solved')
+    s().resolveTicket()
+
+    s().viewRecord(s().progress.records[0]!)
+    const next = s().queue.tickets.find(t => t.status !== 'completed')!
+    s().claimTicket(next.number)
+
+    expect(s().viewing).toBeNull()
+  })
+})
+
+/**
+ * Скрытие чужого тикета не трогает текущий инцидент.
+ *
+ * Очередь пересобирается из окна генератора, а `createQueue` всегда
+ * отдаёт `assigned: null` — назначение терялось, даже когда скрывали
+ * совсем другой тикет. Кнопки скрытия в интерфейсе пока нет, но
+ * правило должно быть верным до того, как она появится.
+ */
+describe('скрытие тикета', () => {
+  it('скрытый уходит из очереди и возвращается в пул', () => {
+    const victim = s().queue.tickets[1]!.number
+    s().hideTicket(victim)
+    expect(s().queue.tickets.some(t => t.number === victim)).toBe(false)
+  })
+
+  it('скрытие чужого тикета не снимает текущий с вас', () => {
+    const mine = firstNumber()
+    s().claimTicket(mine)
+    const other = s().queue.tickets.find(t => t.number !== mine)!.number
+
+    s().hideTicket(other)
+
+    expect(s().queue.assigned).toBe(mine)
+    expect(s().activeTool).toBe('ticket')
+  })
+
+  it('скрытие своего тикета освобождает слот и возвращает в очередь', () => {
+    const mine = firstNumber()
+    s().claimTicket(mine)
+    s().hideTicket(mine)
+
+    expect(s().queue.assigned).toBeNull()
+    expect(s().activeTool).toBe('queue')
+  })
+
+  it('скрытие не пишет прохождение в историю', () => {
+    s().claimTicket(firstNumber())
+    s().hideTicket(firstNumber())
+    expect(s().progress.records).toHaveLength(0)
   })
 })

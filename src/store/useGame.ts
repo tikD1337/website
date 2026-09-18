@@ -345,9 +345,52 @@ export function createGameStore(
     },
 
     claimTicket(number) {
-      const q = get().queue
+      const st = get()
+      const q = st.queue
+
+      /*
+        Возврат к своему же тикету — не новый инцидент.
+
+        По строке очереди кликают и чтобы вернуться к начатому. Раньше
+        это проходило через `claim` и сбрасывало рабочий статус:
+        поставил «ждём пользователя», заглянул в очередь, вернулся — и
+        снова «назначен». Журнал при этом стирать тем более нельзя,
+        иначе клик по своей же строке уничтожал бы всю работу.
+      */
+      if (q.assigned === number) {
+        set({ activeTool: 'ticket', viewing: null })
+        return
+      }
+
       claim(q, number, clock)
-      set({ queue: { ...q }, activeTool: 'ticket' })
+
+      /*
+        Новый инцидент — новый журнал.
+
+        `session` есть вход для всей оценки, и относится он к
+        инциденту, а не к смене. Пока смена состояла из одного тикета,
+        разницы не было; теперь их несколько подряд, и подтверждение,
+        полученное у одного заявителя, засчитывалось следующему — как
+        и сверка личности, и чужие команды, и чужие опасные действия.
+
+        Вместе с журналом заканчивается и всё, что было открыто по
+        прошлому инциденту: разговор шёл с другим человеком, окна и
+        вывод терминала — с другой машины. Мир при этом общий
+        намеренно: последствия работы переживают инцидент, иначе тихие
+        поломки перестали бы быть тихими.
+      */
+      set({
+        queue: { ...q },
+        activeTool: 'ticket',
+        session: createSession(),
+        terminalLines: banner(),
+        windows: createWindows(),
+        channel: 'call',
+        talkingTo: null,
+        waitingReply: false,
+        dialogueNotice: null,
+        viewing: null,
+      })
     },
 
     setTicketStatus(status) {
@@ -917,6 +960,8 @@ export function createGameStore(
         activeTool: 'scorecard',
         progress,
         shiftExhausted: generator.exhausted,
+        // Свой разбор вытесняет чужой: иначе экран покажет прошлое.
+        viewing: null,
       })
 
       void saveProgress(progress).catch(() => {
@@ -933,11 +978,21 @@ export function createGameStore(
       generator.pool.push(t.scenarioId)
       generator.tickets = q.tickets.filter(x => x.number !== number)
       fillQueue(generator, SCENARIOS)
-      const next = {
-        queue: createQueue(generator.tickets),
-        shiftExhausted: generator.exhausted,
-      }
-      if (q.assigned === number) set({ ...next, activeTool: 'queue' })
+
+      /*
+        Скрыли чужой тикет — текущий остаётся на вас.
+
+        `createQueue` всегда отдаёт пустое назначение, и пересборка
+        очереди снимала инцидент, которого никто не трогал: техник
+        убирал лишнюю строку из списка и обнаруживал, что удалёнка
+        закрылась, а начатое дело больше не числится за ним.
+      */
+      const hidMine = q.assigned === number
+      const queue = createQueue(generator.tickets)
+      if (!hidMine) queue.assigned = q.assigned
+
+      const next = { queue, shiftExhausted: generator.exhausted }
+      if (hidMine) set({ ...next, activeTool: 'queue' })
       else set(next)
     },
 

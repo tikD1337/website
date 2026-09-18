@@ -36,11 +36,28 @@ describe('окно смены', () => {
 
   it('закрыл тикет — пришёл следующий из пула', () => {
     const g = gen()
-    g.tickets[0]!.status = 'completed'
+    // Закрываем тот, чью машину ждёт очередной из пула (C2 сидит на M-3).
+    const onWaitedDevice = g.tickets.find(t => t.device === 'M-3')!
+    onWaitedDevice.status = 'completed'
     fillQueue(g, SCENARIOS)
+
     expect(g.tickets).toHaveLength(SHIFT_WINDOW)
-    // закрытый ушёл из окна, на его месте — новый из пула
-    expect(g.pool.length).toBe(SCENARIOS.length - SHIFT_WINDOW - 1)
+    expect(g.tickets.map(t => t.scenarioId)).toContain('c2')
+    expect(g.pool).toHaveLength(0)
+  })
+
+  /*
+    Пополнение не отменяет правила одной поломки на машину: место в
+    окне освободилось, но занять его некому, пока занята машина.
+  */
+  it('место в окне не занимает тот, чья машина ещё занята', () => {
+    const g = gen()
+    const onFreeDevice = g.tickets.find(t => t.device === 'M-1')!
+    onFreeDevice.status = 'completed'
+    fillQueue(g, SCENARIOS)
+
+    expect(g.tickets.map(t => t.scenarioId).sort()).toEqual(['b', 'c'])
+    expect(g.pool).toEqual(['c2'])
   })
 
   it('у каждого тикета свой номер', () => {
@@ -100,5 +117,54 @@ describe('пул может исчерпаться', () => {
     }
     expect(g.tickets.length).toBe(0)
     expect(g.exhausted).toBe(true)
+  })
+})
+/**
+ * Занятость машины проверяется на каждой вставке, а не один раз.
+ *
+ * Множество занятых машин строилось до цикла и внутри него не
+ * пополнялось. Пока окно наполнялось с нуля, оно было пустым — и два
+ * сценария на одной машине спокойно въезжали в очередь вместе. Две
+ * поломки на одной машине ломают друг друга, и обе диагностики
+ * становятся враньём.
+ *
+ * Сегодня это не видно: у всех четырёх сценариев разные машины. Срез 8
+ * добавит варианты одного сценария — та же поломка на другой машине, —
+ * и тогда выстрелит.
+ */
+describe('одна открытая поломка на машину', () => {
+  it('в пустое окно не въедут два сценария одной машины', () => {
+    const g = createQueueGenerator(['c', 'c2'])
+    fillQueue(g, SCENARIOS)
+
+    expect(g.tickets).toHaveLength(1)
+    expect(g.pool).toEqual(['c2'])
+  })
+
+  it('отложенный сценарий приходит, когда машина освободилась', () => {
+    const g = createQueueGenerator(['c', 'c2'])
+    fillQueue(g, SCENARIOS)
+
+    g.tickets[0]!.status = 'completed'
+    fillQueue(g, SCENARIOS)
+
+    expect(g.tickets.map(t => t.scenarioId)).toEqual(['c2'])
+    expect(g.pool).toHaveLength(0)
+  })
+
+  it('сценарий на свободной машине не ждёт занятую', () => {
+    // Порядок пула нарочно ставит конфликтующий раньше свободного.
+    const g = createQueueGenerator(['c', 'c2', 'b'])
+    fillQueue(g, SCENARIOS)
+
+    const inWindow = g.tickets.map(t => t.scenarioId).sort()
+    expect(inWindow).toEqual(['b', 'c'])
+    expect(g.pool).toEqual(['c2'])
+  })
+
+  it('пул не считается исчерпанным, пока в нём ждёт отложенный', () => {
+    const g = createQueueGenerator(['c', 'c2'])
+    fillQueue(g, SCENARIOS)
+    expect(g.exhausted).toBe(false)
   })
 })

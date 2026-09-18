@@ -1,4 +1,4 @@
-import type { Progress, TicketRecord } from './types'
+import type { TicketRecord } from './types'
 
 export interface ValidationError {
   code: string
@@ -6,18 +6,50 @@ export interface ValidationError {
   record?: TicketRecord
 }
 
-export function validateProgress(progress: Progress): ValidationError[] {
+/**
+ * Проверка прочитанного из хранилища.
+ *
+ * Принимает `unknown`, и это главное в модуле: прочитанное из
+ * IndexedDB не является `Progress` до тех пор, пока не проверено. Его
+ * могла записать прошлая версия, повредить прерванное обновление или
+ * подменить кто угодно через консоль браузера — типы TypeScript до
+ * границы хранилища не достают.
+ *
+ * **Не бросает исключений ни на какой вход.** Это не вкусовщина:
+ * проверка вызывается внутри колбэка запроса IndexedDB, куда внешний
+ * `try/catch` не дотягивается. Брошенное отсюда исключение оставляло
+ * промис загрузки неразрешённым навсегда, и экраны истории и профиля
+ * навсегда застревали в «Загружается…» — из-за одной испорченной
+ * записи терялся весь прогресс.
+ */
+export function validateProgress(raw: unknown): ValidationError[] {
   const errors: ValidationError[] = []
+
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return [{ code: 'bad_shape', message: 'прочитано не похоже на прогресс' }]
+  }
+
+  const progress = raw as { version?: unknown; records?: unknown }
 
   if (progress.version !== 1) {
     errors.push({
       code: 'bad_version',
-      message: `неподдерживаемая версия хранилища: ${progress.version}`,
+      message: `неподдерживаемая версия хранилища: ${String(progress.version)}`,
     })
     return errors
   }
 
-  for (const r of progress.records) {
+  if (!Array.isArray(progress.records)) {
+    return [{ code: 'bad_records', message: 'список прохождений не массив' }]
+  }
+
+  for (const entry of progress.records) {
+    if (typeof entry !== 'object' || entry === null) {
+      errors.push({ code: 'bad_record', message: 'запись не объект' })
+      continue
+    }
+    const r = entry as TicketRecord
+
     if (!r.id) errors.push({ code: 'missing_id', message: 'запись без id', record: r })
     if (!r.shiftId) errors.push({ code: 'missing_shiftId', message: 'запись без shiftId', record: r })
     if (!r.at) errors.push({ code: 'missing_at', message: 'запись без даты', record: r })

@@ -57,14 +57,29 @@ export async function loadProgress(): Promise<Progress> {
       const store = tx.objectStore('progress')
       const req = store.get('current')
       req.onsuccess = () => {
-        const raw = req.result as Progress | undefined
-        if (!raw) {
+        /*
+          Свой `try` внутри колбэка, а не только снаружи.
+
+          Окружающий `try/catch` к этому моменту давно вернулся: колбэк
+          вызывается позже, из очереди событий. Исключение отсюда не
+          ловилось никем, промис оставался неразрешённым навсегда, и
+          экраны истории и профиля застревали в «Загружается…» — весь
+          прогресс терялся из-за одной битой записи. Проверка теперь и
+          сама не бросает, но рубеж нужен именно здесь: у чужих данных
+          столько форм, сколько их успели записать чужие версии.
+        */
+        try {
+          const raw: unknown = req.result
+          if (!raw) {
+            resolve(emptyProgress())
+            return
+          }
+          const errors = validateProgress(raw)
+          // Мусор в хранилище — сбрасываем молча, как в dialogue.
+          resolve(errors.length === 0 ? (raw as Progress) : emptyProgress())
+        } catch {
           resolve(emptyProgress())
-          return
         }
-        const errors = validateProgress(raw)
-        // Мусор в хранилище — сбрасываем молча, как в dialogue.
-        resolve(errors.length === 0 ? raw : emptyProgress())
       }
       req.onerror = () => resolve(emptyProgress())
     } catch {

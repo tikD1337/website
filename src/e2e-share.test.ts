@@ -266,3 +266,64 @@ describe('доказательство цели: команда или откр�
     expect(s().session.inspected.filter(x => x === 'user:n.haruna')).toHaveLength(1)
   })
 })
+
+/**
+ * Ранняя просьба не закрывает дорогу к решению.
+ *
+ * «Выйти и войти заново» — обычная просьба первой линии, и попросить
+ * об этом до того, как найдена причина, естественно. Заявительница
+ * честно выйдет, войдёт и скажет, что ничего не изменилось: членства
+ * ещё нет, перевыпускать в билете нечего. Но просьба обязана остаться
+ * доступной — иначе единственный путь к решению закрыт навсегда
+ * первой же разумной попыткой, и сценарий становится непроходимым.
+ */
+describe('просьба, о которой попросили рано', () => {
+  it('ранний вход заново честно не помогает', () => {
+    const s = store()
+    s().askRequesterTo('relogin')
+
+    const reply = s().session.dialogue.at(-1)!
+    expect(reply.speaker).toBe('requester')
+    expect(reply.text).toContain('всё то же самое')
+    expect(hasShareAccess(s().world, 'n.haruna', SHARE)).toBe(false)
+  })
+
+  it('после добавления в группу повторная просьба решает инцидент', () => {
+    const s = store()
+    s().askRequesterTo('relogin')
+    s().addUserToGroup('n.haruna', GROUP)
+    s().askRequesterTo('relogin')
+
+    const reply = s().session.dialogue.at(-1)!
+    expect(reply.text).toContain('папка открылась')
+    expect(hasShareAccess(s().world, 'n.haruna', SHARE)).toBe(true)
+  })
+
+  it('повтор не задваивает просьбу в журнале', () => {
+    const s = store()
+    s().askRequesterTo('relogin')
+    s().askRequesterTo('relogin')
+    expect(s().session.askedFor.filter(a => a === 'relogin')).toHaveLength(1)
+  })
+
+  it('прохождение с ранней просьбой всё равно даёт полный вердикт', () => {
+    const s = store()
+
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    // Попросили войти заново раньше, чем нашли причину, — не помогло.
+    s().askRequesterTo('relogin')
+    s().runCommand('net user n.haruna')
+    s().runCommand('dsquery group -name GRP-Finance*')
+    s().addUserToGroup('n.haruna', GROUP)
+    s().askRequesterTo('relogin')
+    s().confirmWithUser()
+
+    s().saveResolutionNotes(GOOD_NOTE)
+    s().setResolutionCode('solved')
+    s().resolveTicket()
+
+    const card = s().scorecard!
+    expect(card.objectives.filter(o => !o.met).map(o => o.id)).toEqual([])
+    expect(card.verdict).toBe('full')
+  })
+})

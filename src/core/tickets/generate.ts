@@ -61,27 +61,37 @@ export function fillQueue(
   // Закрытые тикеты покидают окно: их место освободилось для новых.
   g.tickets = g.tickets.filter(t => t.status !== 'completed')
 
-  // Машины ещё открытых тикетов — сесть на них нельзя.
-  const busyDevices = new Set(g.tickets.map(t => t.device))
+  /*
+    Занятость машины проверяется на каждой вставке, а не один раз
+    заранее.
 
-  // Экземпляры на занятых машинах уходят в конец пула, не теряясь.
-  const blocked: string[] = []
-  for (let i = g.pool.length - 1; i >= 0; i--) {
-    const id = g.pool[i]!
-    const sc = scenarios.find(s => s.id === id)
-    if (sc && busyDevices.has(sc.device)) {
-      blocked.push(id)
-      g.pool.splice(i, 1)
-    }
-  }
-  g.pool.push(...blocked)
+    Множество занятых строилось до цикла и внутри него не пополнялось.
+    Пока окно наполнялось с нуля, оно было пустым — и два сценария на
+    одной машине въезжали в очередь вместе, после чего ломали друг
+    друга, а обе диагностики становились враньём. Отложенные остаются
+    в пуле и приходят, когда машина освободится: откладывание — не
+    потеря.
+  */
+  const busyDevices = new Set(g.tickets.map(t => t.device))
+  const waiting: string[] = []
 
   while (g.tickets.length < g.window && g.pool.length > 0) {
     const id = g.pool.shift()!
     const sc = scenarios.find(s => s.id === id)
+    // Экземпляр без сценария — мусор в пуле, а не отложенное дело.
     if (!sc) continue
+
+    if (busyDevices.has(sc.device)) {
+      waiting.push(id)
+      continue
+    }
+
+    busyDevices.add(sc.device)
     g.tickets.push(buildTicket(sc))
   }
+
+  // Отложенные возвращаются в начало: они ждали дольше остальных.
+  g.pool.unshift(...waiting)
 
   g.exhausted = g.pool.length === 0 && g.tickets.length === 0
 }
