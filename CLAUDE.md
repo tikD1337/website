@@ -464,6 +464,31 @@ CMDB, логистика, база знаний) → 7. Курсы и интер
   Источник, версии и лицензии — `.claude/skills/README.md`.
 - **Граф кода** — локальная программа, а не коннектор claude.ai. Готовые сборки
   с GitHub прокси не отдаёт, пускает только `git clone`, поэтому граф собирается
-  из исходников. Режим `codebase-memory-mcp cli <инструмент> '<json>'` работает
-  через Bash без подключения MCP. Сборка стороннего кода в автоматическом режиме
-  блокируется фильтром безопасности — её подтверждает пользователь.
+  из исходников (~5 минут, бинарник ~300 МБ). В облаке он работает через Bash в
+  режиме `cli`, без подключения MCP; аргументы — JSON на стандартный вход:
+
+  ```bash
+  echo '{"repo_path":"/home/user/website"}' | codebase-memory-mcp cli index_repository
+  echo '{"project":"home-user-website","name_pattern":"^fillQueue$"}' | codebase-memory-mcp cli search_graph
+  echo '{"project":"home-user-website","function_name":"fillQueue","direction":"inbound","depth":2}' | codebase-memory-mcp cli trace_path
+  ```
+
+  Проект в облаке называется `home-user-website`. Контейнер одноразовый, и
+  чтобы граф был в каждой сессии, сборка должна стоять в setup script
+  окружения (меню облачного окружения в заголовке сессии → Edit → Setup
+  script):
+
+  ```bash
+  if ! command -v codebase-memory-mcp >/dev/null; then
+    git init -q /opt/cbm-src && cd /opt/cbm-src
+    git fetch -q --depth 1 https://github.com/DeusData/codebase-memory-mcp 5df8b0442c48fed654c6f11d94cb6f64f00fc368
+    GIT_LFS_SKIP_SMUDGE=1 git checkout -q FETCH_HEAD
+    make -f Makefile.cbm -j"$(nproc)" cbm
+    install -m755 build/c/codebase-memory-mcp /usr/local/bin/codebase-memory-mcp
+    cd / && rm -rf /opt/cbm-src
+  fi
+  ```
+
+  Сборка стороннего кода в автоматическом режиме блокируется фильтром
+  безопасности — внутри сессии её подтверждает пользователь, setup script
+  этого не требует.
