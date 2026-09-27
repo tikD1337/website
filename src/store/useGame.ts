@@ -1,7 +1,7 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand'
-import { loadScenarios } from '../core/scenario/load'
+import { validateScenarios } from '../core/scenario/load'
 import { allHold } from '../core/scenario/check'
-import { applyInject } from '../core/world/world'
+import { applyInject, createWorld } from '../core/world/world'
 import { SCENARIOS, scenarioFor } from '../scenarios'
 import {
   createQueue, claim, setStatus, resolve, findTicket,
@@ -218,8 +218,16 @@ export function createGameStore(
   const generator = createQueueGenerator(SCENARIOS.map(s => s.id), shiftWindow)
   let shiftCounter = 0
 
+  // Опечатка в сценарии падает при запуске, а не когда до него дойдёт очередь.
+  validateScenarios(SCENARIOS)
+
   const fresh = () => {
-    const { world } = loadScenarios(SCENARIOS)
+    /*
+      Мир начинается исправным и ломается по мере того, как тикеты
+      входят в окно смены, — см. `fillQueue`. Сценарий, ждущий в пуле,
+      машину не трогает.
+    */
+    const world = createWorld()
     shiftCounter++
     /*
       Смена помечается временем начала, а не одним лишь счётчиком.
@@ -236,7 +244,8 @@ export function createGameStore(
     generator.tickets = []
     generator.pool = SCENARIOS.map(s => s.id)
     generator.exhausted = false
-    fillQueue(generator, SCENARIOS)
+    generator.injected = []
+    fillQueue(generator, SCENARIOS, world)
     return {
       world,
       queue: createQueue(generator.tickets),
@@ -929,7 +938,7 @@ export function createGameStore(
         scenario: scenarioFor(ticket.scenarioId),
       })
 
-      fillQueue(generator, SCENARIOS)
+      fillQueue(generator, SCENARIOS, st.world)
 
       /*
         Единственная точка записи прохождения: после оценки, после
@@ -954,6 +963,8 @@ export function createGameStore(
       }
 
       set({
+        // Вошедший тикет мог сломать свою машину — мир изменился.
+        world: { ...st.world },
         queue: createQueue(generator.tickets),
         scorecard,
         scoredScenarioId: ticket.scenarioId,
@@ -977,7 +988,7 @@ export function createGameStore(
       // Возвращаем в пул — без штрафа, это отложенное дело.
       generator.pool.push(t.scenarioId)
       generator.tickets = q.tickets.filter(x => x.number !== number)
-      fillQueue(generator, SCENARIOS)
+      fillQueue(generator, SCENARIOS, st.world)
 
       /*
         Скрыли чужой тикет — текущий остаётся на вас.
@@ -991,7 +1002,11 @@ export function createGameStore(
       const queue = createQueue(generator.tickets)
       if (!hidMine) queue.assigned = q.assigned
 
-      const next = { queue, shiftExhausted: generator.exhausted }
+      const next = {
+        world: { ...st.world },
+        queue,
+        shiftExhausted: generator.exhausted,
+      }
       if (hidMine) set({ ...next, activeTool: 'queue' })
       else set(next)
     },

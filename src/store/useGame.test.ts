@@ -256,6 +256,36 @@ describe('пул исчерпан', () => {
 })
 
 /**
+ * Поломка входит в мир вместе с тикетом.
+ *
+ * Раньше мир при старте смены ломался по всей библиотеке сразу, и
+ * правило «одна поломка на машину» держалось только в очереди.
+ */
+describe('поломка приходит с тикетом', () => {
+  const spooler = () => s().world.devices['AL-DSK-0192']!.services
+    .find(x => x.name === 'Spooler')!
+
+  beforeEach(() => {
+    // Окно в один тикет: второй сценарий (диспетчер печати) ждёт в пуле.
+    g = createGameStore({ now: () => new Date('2026-09-09T18:00:00.000Z') }, undefined, 1)
+  })
+
+  it('машина сценария, ждущего в пуле, исправна', () => {
+    expect(s().queue.tickets.map(t => t.scenarioId)).toEqual(['net-apipa-no-lease'])
+    expect(spooler().status).toBe('running')
+  })
+
+  it('закрыли тикет — вошёл следующий и сломал свою машину', () => {
+    s().claimTicket(firstNumber())
+    s().setResolutionCode('solved')
+    s().resolveTicket()
+
+    expect(s().queue.tickets.map(t => t.scenarioId)).toEqual(['print-spooler-stopped'])
+    expect(spooler().status).toBe('stopped')
+  })
+})
+
+/**
  * Изоляция инцидентов.
  *
  * Журнал сессии — вход для всей оценки, и он относится к инциденту, а
