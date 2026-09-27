@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createGameStore } from './useGame'
+import { apipaNoLease } from '../scenarios/net-apipa-no-lease'
+import { HANDOFF_REPLY } from '../core/dialogue/scripted'
+import type { Scenario } from '../core/scenario/types'
 
 let g: ReturnType<typeof createGameStore>
 const s = () => g.getState()
@@ -269,5 +272,118 @@ describe('скрытие тикета', () => {
     expect(s().queue.assigned).toBeNull()
     expect(s().activeTool).toBe('queue')
     expect(s().progress.records).toHaveLength(0)
+  })
+})
+
+describe('серверная', () => {
+  const console = (sw = 'SW-FL3-01') => s().consoles[sw]!
+  const type = (...lines: string[]) => { for (const l of lines) s().runSwitchCommand('SW-FL3-01', l) }
+  const port = () => s().world.network.switches[0]!.ports[0]!
+
+  /*
+    Консоль пишет в журнал инцидента: цели сверяются с командами на
+    коммутаторе так же, как с командами на машине. И сбрасывается вместе
+    с инцидентом — вывод чужой консоли в новом инциденте был бы тем же
+    дефектом, что журнал, протекавший из тикета в тикет.
+  */
+  it('консоль пишет в журнал инцидента и сбрасывается со следующим тикетом', () => {
+    s().claimTicket(firstNumber())
+    expect(s().session.incident).toEqual({
+      number: firstNumber(), device: 'AL-LPT-0447', requester: 'p.raman',
+    })
+
+    type('sh mac add add a483.e72c.9144')
+    expect(s().session.commands.at(-1)).toMatchObject({
+      device: 'SW-FL3-01', canonical: 'show mac address-table address a483.e72c.9144',
+    })
+    expect(console().lines.some(l => l.text.includes('DYNAMIC     Gi1/0/1'))).toBe(true)
+
+    // Подсказка возвращает набранное в строку ввода.
+    type('show ?')
+    expect(console().draft).toBe('show ')
+    expect(console().cli.mode).toBe('user')
+
+    close()
+    s().claimTicket(nextOpen().number)
+    expect(s().consoles).toEqual({})
+  })
+
+  /* Правило машины и каталога: изменение без инцидента некому объяснить. */
+  it('изменения серверной — только по взятому тикету', () => {
+    const none = { ok: false, error: 'нет активного инцидента' }
+    expect(s().setPortVlan('SW-FL3-01', 'Gi1/0/1', 40)).toEqual(none)
+    expect(s().setPortEnabled('SW-FL3-01', 'Gi1/0/1', false)).toEqual(none)
+    expect(s().setPortDescription('SW-FL3-01', 'Gi1/0/1', 'x')).toEqual(none)
+    expect(s().saveSwitchConfig('SW-FL3-01')).toEqual(none)
+
+    // Смотреть в консоли можно и без тикета, менять — нет.
+    type('enable', 'conf t', 'int gi1/0/1', 'shutdown')
+    expect(console().lines.at(-1)!.text).toBe('Command authorization failed.')
+    expect(port().adminUp).toBe(true)
+
+    s().claimTicket(firstNumber())
+    const before = s().world
+    expect(s().setPortVlan('SW-FL3-01', 'Gi1/0/1', 40)).toEqual({ ok: true })
+    expect(s().world).not.toBe(before)
+    expect(port().accessVlan).toBe(40)
+    expect(s().session.changes).toHaveLength(1)
+  })
+
+  /*
+    Для эскалации сообщить о передаче — то же, что подтверждение для
+    починки. Кнопка и фраза в разговоре поднимают один флаг.
+  */
+  it('сообщить о передаче — реплика техника, ответ заявителя, флаг', async () => {
+    s().claimTicket(firstNumber())
+    s().informRequester()
+    expect(s().session.flags.userInformed).toBe(true)
+    expect(s().queue.tickets[0]!.communications.map(c => c.text)).toEqual([
+      'Передаю вашу заявку сетевой группе — это настройка сетевого оборудования, '
+        + 'у меня нет к ней доступа. Сообщу, когда починят.',
+      HANDOFF_REPLY,
+    ])
+
+    close()
+    s().claimTicket(nextOpen().number)
+    s().callTo(s().queue.tickets.find(t => t.number === s().queue.assigned)!.requester)
+    await s().say('Передам заявку второй линии')
+    expect(s().session.flags.userInformed).toBe(true)
+  })
+
+  /*
+    Вторая линия чинит после передачи — и после оценки: разбор видит мир
+    таким, каким его оставил техник. Иначе сломанная ретрансляция жила бы
+    до конца смены и делала непроходимыми следующие сетевые тикеты.
+  */
+  it('эскалация применяет починку второй линии после оценки', () => {
+    const HELPERS = 'network.switches[hostname=CR-01].vlanInterfaces[vlan=20].helpers'
+    const relay: Scenario = {
+      ...apipaNoLease, id: 'relay', device: 'AL-LPT-0601', requester: 'd.mbeki',
+      inject: [{ path: HELPERS, value: [] }],
+      onEscalate: [{ path: HELPERS, value: ['10.20.10.5'] }],
+      objectives: [{
+        id: 'obj-relay', title: 'Ретрансляция на месте', steps: [], commands: [], requires: [],
+        state: [{ path: HELPERS, contains: '10.20.10.5', message: '' }], why: '',
+      }],
+      expectedResolution: 'escalate',
+    }
+    g = createGameStore(clockAt('2026-09-09T18:00:00.000Z'), undefined, 1, [relay, apipaNoLease])
+    const helpers = () => s().world.network.switches[1]!.vlanInterfaces.find(v => v.vlan === 20)!.helpers
+    expect(helpers()).toEqual([])
+
+    s().claimTicket(firstNumber())
+    s().setResolutionCode('escalate')
+    s().resolveTicket()
+    expect(s().scorecard!.objectives[0]!.met).toBe(false)
+    expect(helpers()).toEqual(['10.20.10.5'])
+    // Общий ресурс освободился вместе с починкой — вошёл следующий сетевой тикет.
+    expect(s().queue.tickets.map(t => t.scenarioId)).toEqual(['net-apipa-no-lease'])
+
+    // У APIPA патча второй линии нет: эскалация мир не меняет.
+    s().claimTicket(firstNumber())
+    const before = structuredClone(s().world)
+    s().setResolutionCode('escalate')
+    s().resolveTicket()
+    expect(s().world).toEqual(before)
   })
 })
