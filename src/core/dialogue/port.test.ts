@@ -145,6 +145,17 @@ describe('разъём диалога', () => {
     await d.reply(req())
     expect(d.tripped()).toBe(true)
 
+    // Каждое поле подключения по отдельности даёт новую попытку.
+    for (const change of [
+      { mode: 'endpoint' }, { baseUrl: 'http://localhost:1234/v1' }, { model: 'other' }, { apiKey: 'k-2' },
+    ] as const) {
+      d.configure(cfg())
+      await d.reply(req())
+      expect(d.tripped(), JSON.stringify(change)).toBe(true)
+      d.configure(cfg(change))
+      expect(d.tripped(), JSON.stringify(change)).toBe(false)
+    }
+
     fail = false
     d.configure(cfg({ baseUrl: 'http://localhost:1234/v1' }))
     expect(d.tripped()).toBe(false)
