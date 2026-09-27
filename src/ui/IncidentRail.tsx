@@ -123,6 +123,12 @@ export function IncidentRail() {
           <span className={flags.userConfirmed ? 'flag-on' : undefined}>
             {flags.userConfirmed ? '✓' : '—'} заявитель подтвердил
           </span>
+          {/*
+            Только после того, как случилось: постоянная строка
+            «— предупреждён о передаче» подсказывала бы, что тикет
+            ждёт эскалации.
+          */}
+          {flags.userInformed && <span className="flag-on">✓ заявитель предупреждён о передаче</span>}
           {flags.dangerousActions.length > 0 && (
             <span className="flag-bad">
               ✕ опасных действий: {flags.dangerousActions.length}

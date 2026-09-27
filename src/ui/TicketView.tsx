@@ -35,6 +35,7 @@ export function TicketView() {
   const resolveTicket = useGame(s => s.resolveTicket)
   const verifyRequester = useGame(s => s.verifyRequester)
   const confirmWithUser = useGame(s => s.confirmWithUser)
+  const informRequester = useGame(s => s.informRequester)
   const askRequesterTo = useGame(s => s.askRequesterTo)
   const callTo = useGame(s => s.callTo)
   const scenarios = useGame(s => s.scenarios)
@@ -148,6 +149,14 @@ export function TicketView() {
       <div className="bar">
         <button className="act" type="button" onClick={confirmWithUser}>
           Позвонить заявителю
+        </button>
+
+        {/*
+          Для эскалации это то же, что звонок с вопросом «получилось?»
+          для починки: человек без сети должен знать, что заявка ушла.
+        */}
+        <button className="act" type="button" onClick={informRequester}>
+          Сообщить о передаче
         </button>
 
         {/*

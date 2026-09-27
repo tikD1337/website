@@ -44,9 +44,10 @@ import { detectIntent } from '../core/dialogue/intent'
 import { HANDOFF_REPLY } from '../core/dialogue/scripted'
 import { newCli, promptOf, runSwitch, type CliState } from '../core/switchcli/cli'
 import {
-  setAccessVlan, setPortAdmin, setDescription, saveConfig as saveSwitch,
+  setAccessVlan, setPortAdmin, setDescription, saveConfig as saveSwitch, setHelper,
   type InfraResult,
 } from '../core/infra/switchops'
+import { restartServerService } from '../core/infra/serverops'
 import { loadConfig, saveConfig } from '../core/dialogue/store'
 import type { DialogueConfig } from '../core/dialogue/types'
 import type { Turn } from '../core/dialogue/types'
@@ -64,7 +65,7 @@ import {
 } from '../core/progress/db'
 
 export type Tool =
-  | 'queue' | 'ticket' | 'terminal' | 'directory' | 'comms'
+  | 'queue' | 'ticket' | 'terminal' | 'directory' | 'serverroom' | 'comms'
   | 'settings' | 'scorecard' | 'history' | 'profile'
 
 export interface TerminalLine {
@@ -187,12 +188,17 @@ export interface GameState {
   /** техник открыл карточку объекта в консоли — это тоже проверка */
   inspectObject(kind: 'user' | 'group' | 'device' | 'port' | 'svi', id: string): void
 
+  /** Открыть сеанс консоли коммутатора, если он ещё не открыт. */
+  openConsole(device: string): void
   /** Строка в консоли коммутатора; смотреть можно всегда, менять — по тикету. */
   runSwitchCommand(device: string, line: string): void
+  /** Ретрансляция на интерфейсе VLAN ядра — кнопка есть, но это всегда отказ. */
+  setSviHelper(sw: string, vlan: number, ip: string, add: boolean): InfraResult
   setPortVlan(sw: string, port: string, vlan: number): InfraResult
   setPortEnabled(sw: string, port: string, up: boolean): InfraResult
   setPortDescription(sw: string, port: string, text: string): InfraResult
   saveSwitchConfig(sw: string): InfraResult
+  restartServerService(server: string, service: string): InfraResult
   /** Сказать заявителю, что заявка передана дальше и кому. */
   informRequester(): void
   /** проверка доступа — только чтение, для окна общих ресурсов */
@@ -969,6 +975,12 @@ export function createGameStore(
       set({ session: { ...st.session } })
     },
 
+    openConsole(device) {
+      const st = get()
+      if (st.consoles[device]) return
+      set({ consoles: { ...st.consoles, [device]: { cli: newCli(device), lines: switchBanner(), draft: '' } } })
+    },
+
     runSwitchCommand(device, line) {
       const st = get()
       const open = st.consoles[device] ?? { cli: newCli(device), lines: switchBanner(), draft: '' }
@@ -1007,6 +1019,14 @@ export function createGameStore(
 
     saveSwitchConfig(sw) {
       return infraOp((world, session) => saveSwitch(world, sw, session, clock))
+    },
+
+    setSviHelper(sw, vlan, ip, add) {
+      return infraOp((world, session) => setHelper(world, sw, vlan, ip, add, session, clock))
+    },
+
+    restartServerService(server, service) {
+      return infraOp((world, session) => restartServerService(world, server, service, session, clock))
     },
 
     /**

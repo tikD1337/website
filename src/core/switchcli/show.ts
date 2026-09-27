@@ -151,11 +151,21 @@ export function vlanBrief(sw: NetSwitch): string {
 
 export type MacFilter = { mac: string } | { port: string } | { vlan: number } | null
 
+/**
+ * MAC, который коммутатор видит на порту доступа, — или `null`.
+ *
+ * Одно место и для таблицы MAC, и для карточки порта: коммутатор знает
+ * адрес за портом, а не имя машины. Найти машину по порту — работа.
+ */
+export function learnedMac(world: WorldState, port: SwitchPort): string | null {
+  if (port.mode !== 'access' || portStatus(world, port) !== 'connected') return null
+  return hostMac(world, port.connectedTo)
+}
+
 export function macTable(world: WorldState, sw: NetSwitch, filter: MacFilter): string {
   const entries = sw.ports
-    .filter(p => p.mode === 'access' && portStatus(world, p) === 'connected')
     .flatMap(p => {
-      const mac = hostMac(world, p.connectedTo)
+      const mac = learnedMac(world, p)
       return mac ? [{ vlan: p.accessVlan, mac, port: p.name }] : []
     })
     .filter(e => !filter

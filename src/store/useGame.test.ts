@@ -316,6 +316,7 @@ describe('серверная', () => {
     expect(s().setPortEnabled('SW-FL3-01', 'Gi1/0/1', false)).toEqual(none)
     expect(s().setPortDescription('SW-FL3-01', 'Gi1/0/1', 'x')).toEqual(none)
     expect(s().saveSwitchConfig('SW-FL3-01')).toEqual(none)
+    expect(s().restartServerService('DHCP01', 'DHCPServer')).toEqual(none)
 
     // Смотреть в консоли можно и без тикета, менять — нет.
     type('enable', 'conf t', 'int gi1/0/1', 'shutdown')
