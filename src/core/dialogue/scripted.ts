@@ -123,6 +123,15 @@ export function scriptedReply(req: DialogueRequest): DialogueReply {
     return { text: brief.problemGone ? good : bad, source: 'scripted' }
   }
 
+  /*
+    Передача — не починка. Заявитель соглашается ждать и ничего не
+    подтверждает: иначе реплика «передаю сетевой группе» закрывала бы
+    цель подтверждения.
+  */
+  if (intent === 'handoff') {
+    return { text: 'Хорошо, спасибо, буду ждать. Сообщите, когда заработает?', source: 'scripted' }
+  }
+
   const best = bestMatch(brief, said)
   if (best) return { text: best, source: 'scripted' }
 

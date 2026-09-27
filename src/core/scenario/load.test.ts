@@ -95,3 +95,18 @@ describe('сторож: у каждой цели есть доказательс
     expect(() => loadScenarios(SCENARIOS)).not.toThrow()
   })
 })
+
+/*
+  Стор ломает мир лениво — при входе тикета в окно, — а вторая линия
+  чинит ещё позже, при эскалации. Опечатка в любом из патчей обязана
+  падать при запуске: иначе она всплывёт через три закрытых тикета,
+  посреди смены.
+*/
+it('сторож: пути инъекции и патча второй линии проверяются при запуске', () => {
+  const broken = (over: Partial<Scenario>) => validateScenarios([{ ...apipaNoLease, ...over }])
+  expect(() => broken({ inject: [{ path: 'devices.NO-SUCH-PC.adapters[0].ip', value: '' }] }))
+    .toThrow(/NO-SUCH-PC/)
+  expect(() => broken({ onEscalate: [{ path: 'network.switches[hostname=CR-99].log', value: [] }] }))
+    .toThrow(/CR-99/)
+  expect(() => validateScenarios(SCENARIOS)).not.toThrow()
+})

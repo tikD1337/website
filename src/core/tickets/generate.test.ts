@@ -102,6 +102,25 @@ describe('одна открытая поломка на машину', () => {
   })
 
   /*
+    Правило обобщается на общие ресурсы: сломанная ретрансляция в VLAN 20
+    сделала бы непроходимым любой сетевой тикет этого VLAN, даже на
+    другой машине.
+  */
+  it('сценарии с общим ресурсом в окне не встречаются', () => {
+    const N1 = { ...A, id: 'n1', device: 'M-5', resources: ['dhcp:vlan20'] }
+    const N2 = { ...A, id: 'n2', device: 'M-6', resources: ['dhcp:vlan20'] }
+    const list = [N1, N2, B]
+    const g = createQueueGenerator(list.map(s => s.id))
+    fillQueue(g, list, world)
+    expect(ids(g)).toEqual(['n1', 'b'])
+    expect(g.pool).toEqual(['n2'])
+
+    g.tickets[0]!.status = 'completed'
+    fillQueue(g, list, world)
+    expect(ids(g)).toEqual(['b', 'n2'])
+  })
+
+  /*
     Поломка входит в мир вместе с тикетом, и один раз. Раньше мир
     ломался сразу по всей библиотеке, и правило держалось только в
     очереди; вернувшийся скрытый тикет не должен откатывать начатую

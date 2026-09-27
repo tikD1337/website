@@ -18,7 +18,7 @@
  * Всё остальное — обычный вопрос.
  */
 
-export type Intent = 'greeting' | 'retry' | 'scope' | 'other'
+export type Intent = 'greeting' | 'retry' | 'scope' | 'handoff' | 'other'
 
 /** Проверить результат: «попробуйте», «получилось?», «работает теперь?». */
 const RETRY = [
@@ -50,6 +50,18 @@ const SCOPE = [
   'у остальных',
 ]
 
+/**
+ * Сообщение о передаче заявки дальше.
+ *
+ * Для эскалации это то же, что подтверждение для починки: человек без
+ * сети должен знать, что заявка ушла, кому и чего ждать. Поднимает флаг
+ * `userInformed`.
+ */
+const HANDOFF = [
+  'передаю', 'передам', 'передал', 'эскалир', 'второй линии', 'вторую линию',
+  'сетевой групп', 'сетевым инженер',
+]
+
 const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'ё').replace(/\s+/g, ' ').trim()
 
 export function detectIntent(said: string): Intent {
@@ -62,6 +74,11 @@ export function detectIntent(said: string): Intent {
     съедал бы флаг у самой естественной формулировки.
   */
   if (SCOPE.some(k => t.includes(k))) return 'scope'
+  /*
+    Передача — раньше проверки результата: «эскалирую, попробуйте
+    позже» говорит прежде всего о том, что заявка ушла дальше.
+  */
+  if (HANDOFF.some(k => t.includes(k))) return 'handoff'
   if (RETRY.some(k => t.includes(k))) return 'retry'
 
   /*

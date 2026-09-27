@@ -47,7 +47,13 @@ function assertObjectivesProvable(s: Scenario): void {
  * очередь через три закрытых тикета.
  */
 export function validateScenarios(list: Scenario[]): void {
-  for (const s of list) assertObjectivesProvable(s)
+  for (const s of list) {
+    assertObjectivesProvable(s)
+    // Патчи прогоняются на черновом мире: нерабочий путь падает громко.
+    const scratch = createWorld()
+    applyInject(scratch, s.inject)
+    applyInject(scratch, s.onEscalate ?? [])
+  }
 }
 
 function makeTicket(s: Scenario): Ticket {

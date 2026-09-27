@@ -114,13 +114,53 @@ describe('оценка инцидента', () => {
   })
 
   it('неверный код снижает полномочия, работа до взятия тикета — владение', () => {
+    // Эскалация решаемого: адрес остался самоназначенным. Это не мина,
+    // оставленная техником, а недоделанная работа — и вердикт не полный.
     const wrongCode = perfectRun()
     wrongCode.ticket.resolutionCode = 'escalate'
-    expect(dim(gradeIncident(wrongCode), 'authority').score).toBe(5)
+    wrongCode.world.devices['AL-LPT-0447']!.adapters[0]!.autoconfigured = true
+    const escalated = gradeIncident(wrongCode)
+    expect(dim(escalated, 'authority').score).toBe(5)
+    expect(escalated.silentFaults).toEqual([])
+    expect(escalated.verdict).toBe('partial')
 
     const unclaimed = perfectRun()
     unclaimed.ticket.createdAt = null
     expect(dim(gradeIncident(unclaimed), 'ownership').score).toBe(4)
+  })
+})
+
+/*
+  Для эскалации «сообщил о передаче» — то же, что подтверждение для
+  починки: без него человек сидит без сети и не знает, ждать ли и чего.
+  Самоназначенный адрес после эскалации — не тихая поломка: переданная
+  проблема и не обязана быть устранена.
+*/
+describe('эскалация', () => {
+  it('коммуникация и качество — по «сообщил о передаче», самоназначенный адрес — не тихая поломка', () => {
+    const escalation = { ...apipaNoLease, expectedResolution: 'escalate' as const }
+    const run = (informed: boolean): GradeArgs => {
+      const { world, ticket } = loadScenario(escalation)
+      const session = createSession()
+      setFlag(session, 'identityVerified', true)
+      setFlag(session, 'announcedBeforeActing', true)
+      setFlag(session, 'userInformed', informed)
+      Object.assign(ticket, {
+        createdAt: '2026-09-09T18:00:00.000Z', status: 'completed',
+        resolutionCode: 'escalate', resolutionNotes: 'Передано сетевой группе.',
+      })
+      return { world, ticket, session, scenario: escalation }
+    }
+
+    const informed = gradeIncident(run(true))
+    expect(informed.silentFaults).toEqual([])
+    expect(dim(informed, 'communication').score).toBe(10)
+    expect(dim(informed, 'resolution').score).toBe(10)
+
+    const silent = gradeIncident(run(false))
+    expect(dim(silent, 'communication').score).toBe(6)
+    expect(dim(silent, 'communication').explain).toContain('передан')
+    expect(dim(silent, 'resolution').score).toBe(5)
   })
 })
 

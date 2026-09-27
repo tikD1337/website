@@ -1,5 +1,9 @@
 export interface NotePart {
-  id: 'symptom' | 'checks' | 'change' | 'verification' | 'handoff'
+  /**
+   * `change` и `verification` — у починки; у эскалации вместо них
+   * `escalation` (что передано) и `informed` (заявитель предупреждён).
+   */
+  id: 'symptom' | 'checks' | 'change' | 'verification' | 'escalation' | 'informed' | 'handoff'
   label: string
   earned: boolean
   explain: string

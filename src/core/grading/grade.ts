@@ -137,7 +137,12 @@ function detectSilentFaults(
     )
   }
 
-  if (a.autoconfigured) {
+  /*
+    Самоназначенный адрес — мина только у того, кто объявил проблему
+    решённой. Эскалированная проблема и не обязана быть устранена:
+    иначе честная передача сломанной ретрансляции валила бы вердикт.
+  */
+  if (a.autoconfigured && ticket.resolutionCode === 'solved') {
     out.push(
       'Адаптер по-прежнему удерживает самоназначенный адрес — исходная '
       + 'проблема не устранена.',
@@ -205,15 +210,23 @@ export function gradeIncident(args: GradeArgs): Scorecard {
     техник, который позвонил и предупредил, добирает балл, а тот, кто
     сделал всё остальное идеально, десятку не теряет.
   */
+  /*
+    У эскалации своё «подтверждение»: заявителю сказали, что заявка
+    передана и кому. Требовать `userConfirmed` значило бы требовать,
+    чтобы он подтвердил починку, которой первая линия сделать не могла.
+  */
+  const escalation = scenario.expectedResolution === 'escalate'
+  const closedLoop = escalation ? session.flags.userInformed : session.flags.userConfirmed
+
   const communication = Math.min(10, (session.flags.identityVerified ? 4 : 0)
-    + (session.flags.userConfirmed ? 6 : 0)
+    + (closedLoop ? 6 : 0)
     + (session.flags.announcedBeforeActing ? 2 : 0))
 
   // Полномочия: опасное действие обнуляет измерение целиком.
   const authority = dangerous > 0 ? 0 : codeRight ? 10 : 5
 
   // Качество решения.
-  const resolutionOk = silentFaults.length === 0 && codeRight && session.flags.userConfirmed
+  const resolutionOk = silentFaults.length === 0 && codeRight && closedLoop
   const resolution = silentFaults.length > 0 ? 2 : resolutionOk ? 10 : 5
 
   const dimensions: DimensionScore[] = [
@@ -248,14 +261,19 @@ export function gradeIncident(args: GradeArgs): Scorecard {
       id: 'communication',
       label: 'Коммуникация',
       score: communication,
-      explain: session.flags.userConfirmed
-        ? 'Личность подтверждена, результат подтверждён заявителем.'
-        : session.flags.announcedBeforeActing
-          ? 'Заявитель не подтвердил, что проблема ушла. Работающий у вас '
-            + 'экран этого не доказывает.'
-          : 'Заявитель не подтвердил, что проблема ушла, — работающий у вас '
-            + 'экран этого не доказывает, — и на связь до начала работы вы '
-            + 'не выходили.',
+      explain: escalation
+        ? closedLoop
+          ? 'Заявитель знает, что заявка передана дальше, кому и чего ждать.'
+          : 'Заявителю не сказали, что заявка передана дальше: человек сидит '
+            + 'без сети и не знает, ждать ли и чего.'
+        : session.flags.userConfirmed
+          ? 'Личность подтверждена, результат подтверждён заявителем.'
+          : session.flags.announcedBeforeActing
+            ? 'Заявитель не подтвердил, что проблема ушла. Работающий у вас '
+              + 'экран этого не доказывает.'
+            : 'Заявитель не подтвердил, что проблема ушла, — работающий у вас '
+              + 'экран этого не доказывает, — и на связь до начала работы вы '
+              + 'не выходили.',
     },
     {
       id: 'authority',
@@ -275,7 +293,9 @@ export function gradeIncident(args: GradeArgs): Scorecard {
       explain: silentFaults.length > 0
         ? 'После вас осталась незамеченная поломка.'
         : resolutionOk
-          ? 'Мир приведён в целевое состояние и подтверждён заявителем.'
+          ? escalation
+            ? 'Проблема передана с доказательствами, заявитель предупреждён.'
+            : 'Мир приведён в целевое состояние и подтверждён заявителем.'
           : 'Решение неполное.',
     },
   ]

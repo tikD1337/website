@@ -83,7 +83,16 @@ export function fillQueue(
     в пуле и приходят, когда машина освободится: откладывание — не
     потеря.
   */
-  const busyDevices = new Set(g.tickets.map(t => t.device))
+  /*
+    Занята не только машина, но и общий ресурс (`resources` сценария):
+    два сценария на одной ретрансляции ломали бы друг друга так же,
+    как два сценария на одной машине.
+  */
+  const claims = (sc: Scenario) => [`device:${sc.device}`, ...(sc.resources ?? [])]
+  const busy = new Set(g.tickets.flatMap(t => {
+    const sc = scenarios.find(s => s.id === t.scenarioId)
+    return sc ? claims(sc) : [`device:${t.device}`]
+  }))
   const waiting: string[] = []
 
   while (g.tickets.length < g.window && g.pool.length > 0) {
@@ -92,12 +101,12 @@ export function fillQueue(
     // Экземпляр без сценария — мусор в пуле, а не отложенное дело.
     if (!sc) continue
 
-    if (busyDevices.has(sc.device)) {
+    if (claims(sc).some(c => busy.has(c))) {
       waiting.push(id)
       continue
     }
 
-    busyDevices.add(sc.device)
+    for (const c of claims(sc)) busy.add(c)
     g.tickets.push(buildTicket(sc))
 
     /*

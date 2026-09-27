@@ -113,6 +113,34 @@ describe('оценка заметки', () => {
   })
 
   /*
+    В заметке об эскалации нечего назвать внесённым изменением: техник
+    и не должен был ничего менять. Вместо этого — что передано, с
+    доказательством с сетевого устройства, и предупреждён ли заявитель.
+  */
+  it('в заметке об эскалации — что передано и кто предупреждён', () => {
+    const escalation = { ...apipaNoLease, expectedResolution: 'escalate' as const }
+    const log = createSession()
+    recordCommand(log, clock, 'AL-LPT-0447', 'ipconfig /all', 0)
+    recordCommand(log, clock, 'CR-01', 'sh run int vlan 20', 0, 'show running-config interface vlan20')
+    setFlag(log, 'userInformed', true)
+    const part = (text: string, id: string, session = log) =>
+      gradeNote(text, session, ticket, escalation).parts.find(p => p.id === id)!.earned
+
+    const full = 'Не открываются сайты. ipconfig /all показал самоназначенный адрес. '
+      + 'На CR-01 show running-config interface vlan20: ретрансляции DHCP нет. '
+      + 'Передаю сетевой группе, заявитель предупреждён.'
+    expect(gradeNote(full, log, ticket, escalation).parts.map(p => [p.id, p.earned])).toEqual([
+      ['symptom', true], ['checks', true], ['escalation', true], ['informed', true], ['handoff', true],
+    ])
+
+    // Передача без доказательства с сетевого устройства и доказательство без передачи.
+    expect(part('Передаю сетевой группе. ipconfig /all показал 169.254.', 'escalation')).toBe(false)
+    expect(part('На CR-01 sh run int vlan 20: ретрансляции нет.', 'escalation')).toBe(false)
+    // Написал, что предупредил, а на деле не предупреждал.
+    expect(part(full, 'informed', createSession())).toBe(false)
+  })
+
+  /*
     Штраф ловит секрет, а не слово «пароль». Прежнее правило считало
     секретом любое слово из шести букв после «пароль», и фраза «пароль
     верный, поэтому не сбрасывал» — единственно верное решение в

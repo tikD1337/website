@@ -217,4 +217,8 @@ export const apipaNoLease: Scenario = {
   ],
 
   expectedResolution: 'solved',
+
+  // Лечится только живой ретрансляцией в VLAN 20: с тикетом, который её
+  // ломает, в одной смене не встречается.
+  resources: ['dhcp:vlan20'],
 }
