@@ -1,10 +1,11 @@
 import type { Clock } from '../world/types'
 import type {
-  SessionLog, DialogueChannel, Speaker, BooleanFlag,
+  SessionLog, DialogueChannel, Speaker, BooleanFlag, Incident,
 } from './types'
 
-export function createSession(): SessionLog {
+export function createSession(incident?: Incident): SessionLog {
   return {
+    ...(incident ? { incident: { ...incident } } : {}),
     askedFor: [],
     inspected: [],
     commands: [],
@@ -16,6 +17,7 @@ export function createSession(): SessionLog {
       userConfirmed: false,
       announcedBeforeActing: false,
       eventLogRead: false,
+      userInformed: false,
       dangerousActions: [],
     },
   }
@@ -28,8 +30,12 @@ export function recordCommand(
   device: string,
   cmdline: string,
   exitCode: number,
+  canonical?: string,
 ): void {
-  s.commands.push({ at: clock.now().toISOString(), device, cmdline, exitCode })
+  s.commands.push({
+    at: clock.now().toISOString(), device, cmdline, exitCode,
+    ...(canonical ? { canonical } : {}),
+  })
 }
 
 /** Каждое изменение мира, с прежним значением — иначе не сверить заметку. */

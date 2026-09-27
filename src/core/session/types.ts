@@ -12,6 +12,19 @@ export interface CommandEntry {
   device: string
   cmdline: string
   exitCode: number
+  /**
+   * Полная форма команды: `show ip interface brief` для набранного
+   * `sh ip int br`. Цели сценария сверяются и с ней, иначе сокращение,
+   * которое понимает настоящая консоль, наказывалось бы.
+   */
+  canonical?: string
+}
+
+/** Инцидент, к которому относится журнал: чья машина, кто обратился. */
+export interface Incident {
+  number: string
+  device: string
+  requester: string
 }
 
 export interface ChangeEntry {
@@ -57,10 +70,22 @@ export interface SessionFlags {
    * упала». Первое чинит на сегодня, второе — по-настоящему.
    */
   eventLogRead: boolean
+  /**
+   * Заявителю сказали, что заявка передана дальше и кому.
+   *
+   * Для эскалации это то же, что подтверждение для починки: без него
+   * человек сидит без сети и не знает, ждать ли, и чего.
+   */
+  userInformed: boolean
   dangerousActions: DangerousAction[]
 }
 
 export interface SessionLog {
+  /**
+   * Инцидент журнала. По нему шлюз решает, что входит в область тикета:
+   * порт машины заявителя — да, чужой — нет.
+   */
+  incident?: Incident
   /**
    * Чья личность подтверждена.
    *

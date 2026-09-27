@@ -52,6 +52,32 @@ describe('шлюз полномочий', () => {
   })
 })
 
+/*
+  Область тикета: первая линия меняет только порт машины из взятого
+  тикета. Чужой порт, аплинк и изменения без тикета — отказ: это уже
+  чужое рабочее место или общая сеть, и нужна эскалация.
+*/
+describe('область тикета', () => {
+  const port = (target: string) =>
+    authorize({ kind: 'infra-change', target, description: 'смена VLAN' }, ctx.world, ctx.session)
+
+  it('порт машины из тикета — можно; чужой, аплинк и без тикета — нельзя', () => {
+    ctx.session = createSession({ number: 'INC0000001', device: 'AL-LPT-0447', requester: 'p.raman' })
+    expect(port('SW-FL3-01/Gi1/0/1')).toEqual({ decision: 'allow', reason: '' })
+
+    for (const target of ['SW-FL3-01/Gi1/0/2', 'SW-FL3-01/Gi1/0/48', 'SW-FL3-01/Gi1/0/99']) {
+      const r = port(target)
+      expect(r.decision, target).toBe('deny')
+      expect(r.reason, target).toContain('вне области тикета')
+    }
+
+    ctx.session = createSession()
+    expect(port('SW-FL3-01/Gi1/0/1')).toMatchObject({
+      decision: 'deny', reason: expect.stringContaining('нет открытого тикета'),
+    })
+  })
+})
+
 describe('netsh advfirewall', () => {
   /*
     Проверено на ориентире: `netsh advfirewall ... state off` → Access is

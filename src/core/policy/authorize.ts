@@ -38,6 +38,8 @@ export type ActionKind =
   | 'account-change'
   | 'shared-system'
   | 'device-change'
+  /** правка порта коммутатора; target — `<коммутатор>/<порт>`, порт коротким именем */
+  | 'infra-change'
 
 export interface Action {
   kind: ActionKind
@@ -52,9 +54,37 @@ export interface AuthResult {
   reason: string
 }
 
+/**
+ * Область тикета: порт, в который воткнута машина из взятого тикета.
+ *
+ * Дублирует поиск порта из `network/link.ts` намеренно — шлюз остаётся
+ * самым нижним слоем и ни от чего, кроме мира, не зависит.
+ */
+function inTicketScope(world: WorldState, session: SessionLog, target: string): AuthResult {
+  if (!session.incident) {
+    return {
+      decision: 'deny',
+      reason: 'нет открытого тикета — изменения инфраструктуры делаются только по тикету',
+    }
+  }
+  const [swName, portName] = target.split('/', 2).length === 2
+    ? [target.slice(0, target.indexOf('/')), target.slice(target.indexOf('/') + 1)]
+    : [target, '']
+  const port = world.network.switches.find(s => s.hostname === swName)
+    ?.ports.find(p => p.name === portName)
+
+  if (port && port.mode === 'access' && port.connectedTo === session.incident.device) {
+    return { decision: 'allow', reason: '' }
+  }
+  return {
+    decision: 'deny',
+    reason: 'вне области тикета — порт не относится к машине заявителя, нужна эскалация',
+  }
+}
+
 export function authorize(
   action: Action,
-  _world: WorldState,
+  world: WorldState,
   session: SessionLog,
 ): AuthResult {
   switch (action.kind) {
@@ -100,5 +130,8 @@ export function authorize(
 
     case 'device-change':
       return { decision: 'allow', reason: '' }
+
+    case 'infra-change':
+      return inTicketScope(world, session, action.target)
   }
 }

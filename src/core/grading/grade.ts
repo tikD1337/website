@@ -66,7 +66,8 @@ function objectiveMet(
     `gui:user:n.haruna` засчитывается открытой карточкой — так работа
     мышью перестаёт быть невидимой для оценки.
   */
-  const ran = new Set(session.commands.map(c => c.cmdline.toLowerCase().trim()))
+  const ran = new Set(session.commands.flatMap(c =>
+    [c.cmdline, c.canonical ?? ''].map(x => x.toLowerCase().trim()).filter(Boolean)))
   const seen = new Set(session.inspected.map(x => x.toLowerCase()))
 
   const evidenceOk = o.commands.length === 0 || o.commands.some(c => {

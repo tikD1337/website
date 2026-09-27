@@ -125,6 +125,25 @@ describe('оценка инцидента', () => {
 })
 
 /*
+  Консоль коммутатора принимает сокращения, как настоящая: `sh ip int br`.
+  Цель сверяется с канонической формой, иначе сокращение наказывалось бы.
+*/
+describe('каноническая форма команды', () => {
+  it('закрывает цель наравне с набранной строкой', () => {
+    const a = perfectRun()
+    a.scenario = {
+      ...apipaNoLease,
+      objectives: [{ id: 'obj-svi', title: 't', steps: ['s'], commands: ['show ip interface brief'],
+        requires: [], why: 'w' }],
+    }
+    const met = () => gradeIncident(a).objectives[0]!.met
+    expect(met()).toBe(false)
+    recordCommand(a.session, clock, 'CR-01', 'sh ip int br', 0, 'show ip interface brief')
+    expect(met()).toBe(true)
+  })
+})
+
+/*
   Найдено разбором кода: надбавка за выясненный масштаб давала десятку
   при незакрытых диагностических целях. Разбор писал «закрыто 1 из 2» и
   тут же ставил 10 из 10 — измерение противоречило собственному
