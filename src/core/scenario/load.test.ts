@@ -11,7 +11,7 @@ describe('загрузка сценария', () => {
       ip: '169.254.23.11', gateway: '', dns: [], autoconfigured: true, leaseObtained: null,
     })
     // Релей уже починился — сегмент здоров, соседняя машина не тронута.
-    expect(world.network.segments[0]!.dhcpHealthy).toBe(true)
+    expect(world.network.segments.find(s => s.vlan === 'vlan20')!.dhcpHealthy).toBe(true)
     expect(world.devices['AL-DSK-0192']!.adapters[0]!.ip).toBe('10.20.14.91')
 
     expect(ticket).toMatchObject({

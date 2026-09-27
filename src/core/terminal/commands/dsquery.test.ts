@@ -28,6 +28,7 @@ describe('dsquery', () => {
         `"CN=Elena Varga,OU=Sales,OU=Employees,OU=Corp,${DC}"`,
         `"CN=Dumisani Mbeki,OU=Operations,OU=Employees,OU=Corp,${DC}"`,
         `"CN=Nadia Haruna,OU=Finance,OU=Employees,OU=Corp,${DC}"`,
+        `"CN=Tomas Lindqvist,OU=Operations,OU=Employees,OU=Corp,${DC}"`,
         `"CN=Домен, административная учётная запись,OU=Tier0-Accounts,OU=Admin,OU=Corp,${DC}"`,
       ),
     })
@@ -56,7 +57,7 @@ describe('dsquery', () => {
       `"CN=Elena Varga,OU=Sales,OU=Employees,OU=Corp,${DC}"`,
     ))
     expect(q('user', `OU=Employees,OU=Corp,${DC}`, '-o', 'samid'))
-      .toBe(out('p.raman', 's.okafor', 'e.varga', 'd.mbeki', 'n.haruna'))
+      .toBe(out('p.raman', 's.okafor', 'e.varga', 'd.mbeki', 'n.haruna', 't.lindqvist'))
     expect(q('user', '-name', 'Priya*'))
       .toBe(out(`"CN=Priya Raman,OU=Sales,OU=Employees,OU=Corp,${DC}"`))
     expect(q('user', '-samid', 's.okafor'))

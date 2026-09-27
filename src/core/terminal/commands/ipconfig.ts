@@ -2,14 +2,11 @@ import { BRAND } from '../../../brand'
 import { field, continuation, joinLines } from '../format'
 import { recordChange } from '../../session/session'
 import type { CommandHandler, CommandContext, CommandResult } from '../types'
-import type { Adapter, NetworkSegment } from '../../world/types'
+import { linkOf, segmentOf } from '../../network/link'
+import type { Adapter } from '../../world/types'
 
 function adaptersOf(ctx: CommandContext): Adapter[] {
   return ctx.world.devices[ctx.device]?.adapters ?? []
-}
-
-function segmentOf(ctx: CommandContext, a: Adapter): NetworkSegment | undefined {
-  return ctx.world.network.segments.find(s => s.vlan === a.segment)
 }
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -47,7 +44,7 @@ function renderAll(ctx: CommandContext): string {
     lines.push(`Ethernet adapter ${a.name}:`, '')
 
     // Опущенный линк обрывает вывод на Media State — так же, как Windows.
-    if (!a.linkUp) {
+    if (!linkOf(ctx.world, ctx.device)) {
       lines.push(field('mediaState', 'Media disconnected'))
       lines.push(field('dnsSuffix', BRAND.dnsSuffix))
       lines.push(field('description', a.description))
@@ -93,7 +90,7 @@ function renderBrief(ctx: CommandContext): string {
 
   for (const a of adaptersOf(ctx)) {
     lines.push(`Ethernet adapter ${a.name}:`, '')
-    if (!a.linkUp) {
+    if (!linkOf(ctx.world, ctx.device)) {
       lines.push(field('mediaState', 'Media disconnected'))
       lines.push(field('dnsSuffix', BRAND.dnsSuffix))
       lines.push('')
@@ -138,7 +135,7 @@ function doRenew(ctx: CommandContext): CommandResult {
   const a = adaptersOf(ctx)[0]
   if (!a) return { stdout: joinLines(header('Ethernet')), exitCode: 1 }
 
-  const seg = segmentOf(ctx, a)
+  const seg = segmentOf(ctx.world, ctx.device)
 
   /**
    * Предусловие, ради которого всё и затевалось.
@@ -150,7 +147,7 @@ function doRenew(ctx: CommandContext): CommandResult {
    * и надо понять почему.
    */
   const holdsApipa = a.autoconfigured
-  const dhcpReachable = Boolean(seg?.dhcpHealthy) && a.linkUp
+  const dhcpReachable = Boolean(seg?.dhcpHealthy) && linkOf(ctx.world, ctx.device)
 
   if (holdsApipa || !dhcpReachable) {
     return {

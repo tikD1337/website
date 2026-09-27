@@ -85,7 +85,8 @@ describe('стартовый каталог', () => {
     const w = createWorld()
     const ips = Object.values(w.devices).map(d => d.adapters[0]!.ip)
     expect(unique(ips)).toBe(true)
-    expect(w.network.segments[0]!.leasePool.length).toBeGreaterThanOrEqual(ips.length)
+    expect(w.network.segments.find(s => s.vlan === 'vlan20')!.leasePool.length)
+      .toBeGreaterThanOrEqual(ips.length)
   })
 
   it('копия мира глубокая: правка копии не трогает оригинал', () => {

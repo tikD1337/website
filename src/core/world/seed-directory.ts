@@ -75,7 +75,7 @@ export function seedGroups(): DirectoryGroup[] {
       displayName: 'Все сотрудники',
       ou: SEC,
       description: 'Доступ к общим документам',
-      members: ['p.raman', 's.okafor', 'e.varga', 'd.mbeki', 'n.haruna'],
+      members: ['p.raman', 's.okafor', 'e.varga', 'd.mbeki', 'n.haruna', 't.lindqvist'],
       grantsAccessTo: [`${fs}\\Company-Wide`],
       protected: false,
     },
@@ -243,6 +243,32 @@ export function seedUsers(): OrgUser[] {
       badPwdCount: 0,
       groups: ['GRP-All-Staff', 'GRP-Printer-Floor3'],
       tokenGroups: ['GRP-All-Staff', 'GRP-Printer-Floor3'],
+    },
+    {
+      /*
+        Диспетчер, сидел за столом 3-06. Каталог о пересадке не знает —
+        кабинет в карточке прежний, и это обычное дело: каталог
+        обновляют по заявке, а пересаживаются по договорённости.
+      */
+      samAccountName: 't.lindqvist',
+      displayName: 'Tomas Lindqvist',
+      dept: 'Операции',
+      title: 'диспетчер',
+      email: `tomas.lindqvist@${BRAND.domain}`,
+      phone: '+1 (512) 555-0177',
+      primaryDevice: 'AL-LPT-0788',
+      ou: `OU=Operations,${EMPLOYEES}`,
+      manager: 'Dumisani Mbeki',
+      office: '3-06',
+      enabled: true,
+      lockedOut: false,
+      lockoutSource: null,
+      pwdExpired: false,
+      pwdLastSet: pwdSet,
+      lastLogon: '2026-09-09T17:20:14.000Z',
+      badPwdCount: 0,
+      groups: ['GRP-All-Staff'],
+      tokenGroups: ['GRP-All-Staff'],
     },
     {
       samAccountName: 'a.tier0',

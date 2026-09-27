@@ -44,6 +44,7 @@ describe('вывод', () => {
         '-'.repeat(79),
         'a.tier0                  d.mbeki                  e.varga                  ',
         'n.haruna                 p.raman                  s.okafor                 ',
+        't.lindqvist              ',
         'The command completed successfully.',
         '',
       ),

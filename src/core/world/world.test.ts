@@ -15,11 +15,7 @@ describe('стартовый мир', () => {
     expect(w.network.dnsServers[0]!.zones['internal-portal.arcline.corp']).toBe('10.20.14.50')
 
     const logins = new Set(w.org.users.map(u => u.samAccountName))
-    const vlans = new Set(w.network.segments.map(s => s.vlan))
-    for (const d of Object.values(w.devices)) {
-      expect(logins.has(d.assignedTo), d.hostname).toBe(true)
-      for (const a of d.adapters) expect(vlans.has(a.segment), d.hostname).toBe(true)
-    }
+    for (const d of Object.values(w.devices)) expect(logins.has(d.assignedTo), d.hostname).toBe(true)
   })
 
   /*
@@ -62,16 +58,53 @@ describe('стартовый мир', () => {
   })
 })
 
+/*
+  Инварианты сети. Линк и VLAN выводятся из порта, поэтому машина без
+  порта или порт в несуществующем VLAN — это машина, которая молча
+  выпала из сети ещё до всякой поломки.
+*/
+describe('стартовая сеть', () => {
+  it('каждая машина воткнута ровно в один порт, каждый VLAN порта существует', () => {
+    const w = createWorld()
+    const ports = w.network.switches.flatMap(sw => sw.ports.map(p => ({ sw, p })))
+    for (const host of Object.keys(w.devices)) {
+      expect(ports.filter(x => x.p.connectedTo === host).length, host).toBe(1)
+    }
+    const segments = new Set(w.network.segments.map(s => s.vlanId))
+    for (const { sw, p } of ports.filter(x => x.p.mode === 'access')) {
+      expect(sw.vlans.map(v => v.id), `${sw.hostname} ${p.name}`).toContain(p.accessVlan)
+      expect(segments.has(p.accessVlan), `${sw.hostname} ${p.name}`).toBe(true)
+      expect(p.saved, `${sw.hostname} ${p.name}`)
+        .toEqual({ accessVlan: p.accessVlan, adminUp: p.adminUp, description: p.description })
+    }
+  })
+
+  it('адреса машин, серверов и принтера уникальны; ретрансляция ядра ведёт на DHCP01', () => {
+    const w = createWorld()
+    const ips = [
+      ...Object.values(w.devices).map(d => d.adapters[0]!.ip),
+      ...w.network.servers.map(s => s.ip),
+      ...w.network.printers.map(p => p.ip),
+    ]
+    expect(new Set(ips).size).toBe(ips.length)
+
+    const core = w.network.switches.find(s => s.role === 'core')!
+    const dhcp = w.network.servers.find(s => s.hostname === 'DHCP01')!
+    expect(core.vlanInterfaces.find(v => v.vlan === 20)!.helpers).toEqual([dhcp.ip])
+    expect(w.network.segments.find(s => s.vlanId === 20)!.dhcpServer).toBe(dhcp.ip)
+  })
+})
+
 describe('инъекция поломки', () => {
   it('ломает мир по списку путей, не задевая соседей, и падает на опечатке', () => {
     const w = createWorld()
     applyInject(w, [
       { path: 'devices.AL-LPT-0447.adapters[0].ip', value: '169.254.23.11' },
       { path: 'devices.AL-LPT-0447.adapters[0].gateway', value: '' },
-      { path: 'network.segments[0].dhcpHealthy', value: false },
+      { path: 'network.segments[vlan=vlan20].dhcpHealthy', value: false },
     ])
     expect(w.devices['AL-LPT-0447']!.adapters[0]).toMatchObject({ ip: '169.254.23.11', gateway: '' })
-    expect(w.network.segments[0]!.dhcpHealthy).toBe(false)
+    expect(w.network.segments.find(s => s.vlan === 'vlan20')!.dhcpHealthy).toBe(false)
     expect(w.devices['AL-DSK-0192']!.adapters[0]!.ip).toBe('10.20.14.91')
 
     expect(() => applyInject(w, [{ path: 'devices.NOPE.adapters[0].ip', value: 'x' }]))

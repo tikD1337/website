@@ -1,11 +1,12 @@
 import { useGame } from '../../store/useGame'
 import { APPS, type AppId } from '../../store/windows'
 import { PINNED, GLYPH } from './Desktop'
+import { linkOf } from '../../core/network/link'
 
 /**
  * Состояние сети глазами системного трея.
  *
- * Читает тот же адаптер, что и `ipconfig`. Поэтому после успешного
+ * Читает тот же адаптер и тот же линк, что и `ipconfig`. Поэтому после успешного
  * `release` + `renew` иконка меняется сама — без единой строчки связи
  * между терминалом и треем. Это и есть проверка архитектуры: если бы
  * трей хранил своё состояние, он бы соврал.
@@ -39,7 +40,7 @@ export function Taskbar() {
 
   const ticket = queue.tickets.find(t => t.number === queue.assigned)
   const adapter = ticket ? world.devices[ticket.device]?.adapters[0] : undefined
-  const net = networkState(adapter)
+  const net = networkState(adapter && { ...adapter, linkUp: linkOf(world, ticket!.device) })
 
   const openIds = new Set(windows.windows.map(w => w.id))
   const buttons = [...PINNED, ...windows.windows.map(w => w.id).filter(

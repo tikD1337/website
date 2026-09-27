@@ -1,7 +1,8 @@
 import { BRAND } from '../../brand'
 import { DOMAIN, seedOus, seedGroups, seedUsers, seedShares } from './seed-directory'
+import { seedNetwork } from './seed-network'
 import type {
-  WorldState, Service, EventEntry, DeviceProcess, Driver, Disk, Adapter,
+  WorldState, Service, EventEntry, DeviceProcess, Driver, Disk, Adapter, Device,
 } from './types'
 
 /**
@@ -234,11 +235,100 @@ function ethernet(mac: string, ip: string): Adapter {
     leaseObtained: '2026-09-09T09:00:00.000Z',
     leaseExpires: '2026-09-10T09:00:00.000Z',
     linkUp: true,
-    segment: 'vlan20',
+  }
+}
+
+function seedDevices(): Record<string, Device> {
+  return {
+    'AL-LPT-0447': {
+      hostname: 'AL-LPT-0447',
+      assetTag: 'AL-L0447',
+      vendor: 'Torvald',
+      model: 'WorkLine T14 Gen 4',
+      assignedTo: 'p.raman',
+      adapters: [ethernet('A4-83-E7-2C-91-44', '10.20.14.88')],
+      services: baseServices(),
+      processes: baseProcesses(),
+      eventLog: baseEventLog(),
+      drivers: baseDrivers('Torvald'),
+      disks: baseDisks(476, 212),
+    },
+
+    'AL-LPT-0512': {
+      hostname: 'AL-LPT-0512',
+      assetTag: 'AL-L0512',
+      vendor: 'Torvald',
+      model: 'WorkLine X1 Gen 12',
+      assignedTo: 'e.varga',
+      adapters: [ethernet('C6-2A-9F-11-58-D3', '10.20.14.89')],
+      services: baseServices(),
+      processes: baseProcesses(),
+      eventLog: baseEventLog(),
+      drivers: baseDrivers('Torvald'),
+      disks: baseDisks(476, 301),
+    },
+
+    'AL-LPT-0601': {
+      hostname: 'AL-LPT-0601',
+      assetTag: 'AL-L0601',
+      vendor: 'Kestrel',
+      model: 'Meridian 5450',
+      assignedTo: 'd.mbeki',
+      adapters: [ethernet('D8-4F-1C-63-20-7A', '10.20.14.90')],
+      services: baseServices(),
+      processes: baseProcesses(),
+      eventLog: baseEventLog(),
+      drivers: baseDrivers('Kestrel'),
+      disks: baseDisks(476, 388),
+    },
+
+    'AL-LPT-0714': {
+      hostname: 'AL-LPT-0714',
+      assetTag: 'AL-L0714',
+      vendor: 'Novatek',
+      model: 'Corvus 14',
+      assignedTo: 'n.haruna',
+      adapters: [ethernet('E0-7B-35-4A-1D-62', '10.20.14.92')],
+      services: baseServices(),
+      processes: baseProcesses(),
+      eventLog: baseEventLog(),
+      drivers: baseDrivers('Novatek'),
+      disks: baseDisks(476, 431),
+    },
+
+    'AL-DSK-0192': {
+      hostname: 'AL-DSK-0192',
+      assetTag: 'AL-D0192',
+      vendor: 'Novatek',
+      model: 'OptiLine 7010',
+      assignedTo: 's.okafor',
+      adapters: [ethernet('B2-1E-4C-77-03-A9', '10.20.14.91')],
+      services: baseServices(),
+      processes: baseProcesses(),
+      eventLog: baseEventLog(),
+      drivers: baseDrivers('Novatek'),
+      disks: baseDisks(952, 640),
+    },
+
+    'AL-LPT-0788': {
+      hostname: 'AL-LPT-0788',
+      assetTag: 'AL-L0788',
+      vendor: 'Kestrel',
+      model: 'Meridian 5450',
+      assignedTo: 't.lindqvist',
+      adapters: [ethernet('F4-39-09-5B-7E-22', '10.20.14.93')],
+      services: baseServices(),
+      processes: baseProcesses(),
+      eventLog: baseEventLog(),
+      drivers: baseDrivers('Kestrel'),
+      disks: baseDisks(476, 402),
+    },
   }
 }
 
 export function seedWorld(): WorldState {
+  const devices = seedDevices()
+  const { segments, ...rest } = seedNetwork(devices)
   return {
     org: {
       domain: DOMAIN,
@@ -248,95 +338,10 @@ export function seedWorld(): WorldState {
       shares: seedShares(),
     },
 
-    devices: {
-      'AL-LPT-0447': {
-        hostname: 'AL-LPT-0447',
-        assetTag: 'AL-L0447',
-        vendor: 'Torvald',
-        model: 'WorkLine T14 Gen 4',
-        assignedTo: 'p.raman',
-        adapters: [ethernet('A4-83-E7-2C-91-44', '10.20.14.88')],
-        services: baseServices(),
-        processes: baseProcesses(),
-        eventLog: baseEventLog(),
-        drivers: baseDrivers('Torvald'),
-        disks: baseDisks(476, 212),
-      },
-
-      'AL-LPT-0512': {
-        hostname: 'AL-LPT-0512',
-        assetTag: 'AL-L0512',
-        vendor: 'Torvald',
-        model: 'WorkLine X1 Gen 12',
-        assignedTo: 'e.varga',
-        adapters: [ethernet('C6-2A-9F-11-58-D3', '10.20.14.89')],
-        services: baseServices(),
-        processes: baseProcesses(),
-        eventLog: baseEventLog(),
-        drivers: baseDrivers('Torvald'),
-        disks: baseDisks(476, 301),
-      },
-
-      'AL-LPT-0601': {
-        hostname: 'AL-LPT-0601',
-        assetTag: 'AL-L0601',
-        vendor: 'Kestrel',
-        model: 'Meridian 5450',
-        assignedTo: 'd.mbeki',
-        adapters: [ethernet('D8-4F-1C-63-20-7A', '10.20.14.90')],
-        services: baseServices(),
-        processes: baseProcesses(),
-        eventLog: baseEventLog(),
-        drivers: baseDrivers('Kestrel'),
-        disks: baseDisks(476, 388),
-      },
-
-      'AL-LPT-0714': {
-        hostname: 'AL-LPT-0714',
-        assetTag: 'AL-L0714',
-        vendor: 'Novatek',
-        model: 'Corvus 14',
-        assignedTo: 'n.haruna',
-        adapters: [ethernet('E0-7B-35-4A-1D-62', '10.20.14.92')],
-        services: baseServices(),
-        processes: baseProcesses(),
-        eventLog: baseEventLog(),
-        drivers: baseDrivers('Novatek'),
-        disks: baseDisks(476, 431),
-      },
-
-      'AL-DSK-0192': {
-        hostname: 'AL-DSK-0192',
-        assetTag: 'AL-D0192',
-        vendor: 'Novatek',
-        model: 'OptiLine 7010',
-        assignedTo: 's.okafor',
-        adapters: [ethernet('B2-1E-4C-77-03-A9', '10.20.14.91')],
-        services: baseServices(),
-        processes: baseProcesses(),
-        eventLog: baseEventLog(),
-        drivers: baseDrivers('Novatek'),
-        disks: baseDisks(952, 640),
-      },
-    },
+    devices,
 
     network: {
-      segments: [
-        {
-          vlan: 'vlan20',
-          subnet: '10.20.14.0/24',
-          gateway: '10.20.14.1',
-          dhcpServer: '10.20.14.5',
-          dhcpHealthy: true,
-          // Пул шире числа машин: иначе renew на второй машине выдал бы
-          // адрес, уже занятый первой, и получился бы конфликт из ничего.
-          leasePool: [
-            '10.20.14.88', '10.20.14.89', '10.20.14.90', '10.20.14.91',
-            '10.20.14.92', '10.20.14.93',
-          ],
-          dns: ['10.20.14.10', '10.20.14.11'],
-        },
-      ],
+      segments,
 
       dnsServers: [
         {
@@ -352,6 +357,7 @@ export function seedWorld(): WorldState {
       ],
 
       publicHosts: ['8.8.8.8', '1.1.1.1'],
+      ...rest,
     },
   }
 }

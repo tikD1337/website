@@ -57,12 +57,20 @@ describe('вывод', () => {
     ))
   })
 
+  /* Линк опускает и кабель со стороны машины, и выключенный порт коммутатора. */
   it('опущенный линк — Media disconnected вместо адреса', () => {
-    applyInject(ctx.world, [{ path: 'devices.AL-LPT-0447.adapters[0].linkUp', value: false }])
-    expect(ipconfig(['/all'], ctx).stdout).toBe(out(...HEAD,
+    const disconnected = out(...HEAD,
       '   Media State . . . . . . . . . . . : Media disconnected',
       ...IDENTITY,
-    ))
+    )
+    applyInject(ctx.world, [{
+      path: 'network.switches[hostname=SW-FL3-01].ports[name=Gi1/0/1].adminUp', value: false,
+    }])
+    expect(ipconfig(['/all'], ctx).stdout).toBe(disconnected)
+
+    ctx.world = createWorld()
+    applyInject(ctx.world, [{ path: 'devices.AL-LPT-0447.adapters[0].linkUp', value: false }])
+    expect(ipconfig(['/all'], ctx).stdout).toBe(disconnected)
   })
 
   it('/flushdns и неизвестный ключ', () => {
@@ -121,7 +129,7 @@ describe('аренда', () => {
 
   it('renew падает и после release, если DHCP сегмента лежит или линк опущен', () => {
     for (const patch of [
-      { path: 'network.segments[0].dhcpHealthy', value: false },
+      { path: 'network.segments[vlan=vlan20].dhcpHealthy', value: false },
       { path: 'devices.AL-LPT-0447.adapters[0].linkUp', value: false },
     ]) {
       ctx.world = createWorld()

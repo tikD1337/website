@@ -34,10 +34,14 @@ export interface Adapter {
   /** ISO-строка либо null, когда аренды нет */
   leaseObtained: string | null
   leaseExpires: string | null
-  /** физический линк; false — «Media disconnected» */
+  /**
+   * Физика со стороны машины: кабель вставлен, сетевая карта включена.
+   *
+   * Итоговый линк — это ещё и порт коммутатора: см. `network/link.ts`.
+   * VLAN адаптер не хранит вовсе — его задаёт порт, в который воткнута
+   * машина. Две копии одного факта разошлись бы на первой правке порта.
+   */
   linkUp: boolean
-  /** vlan сегмента, к которому подключён адаптер */
-  segment: string
 }
 
 export type ServiceStatus = 'running' | 'stopped' | 'paused'
@@ -115,7 +119,12 @@ export interface Device {
 }
 
 export interface NetworkSegment {
+  /** ключ сегмента: 'vlan20' */
   vlan: string
+  /** номер VLAN, как его печатает коммутатор */
+  vlanId: number
+  /** имя VLAN в базе коммутатора: 'STAFF' */
+  name: string
   subnet: string
   gateway: string
   dhcpServer: string
@@ -123,7 +132,112 @@ export interface NetworkSegment {
   dhcpHealthy: boolean
   /** адреса, которые сервер выдаёт по порядку */
   leasePool: string[]
+  /**
+   * Аренды: MAC → адрес.
+   *
+   * Сервер помнит, кому что выдал, и отдаёт машине её прежний адрес.
+   * Без этого любой renew получал первый адрес пула — чужой.
+   */
+  leases: Record<string, string>
   dns: string[]
+}
+
+/** Стартовая конфигурация порта — то, что переживёт перезагрузку коммутатора. */
+export interface PortConfig {
+  accessVlan: number
+  adminUp: boolean
+  description: string
+}
+
+export interface SwitchPort {
+  /** короткое имя, как в show: 'Gi1/0/22' */
+  name: string
+  description: string
+  /** что воткнуто патч-кордом: имя хоста или '' — техник это не меняет */
+  connectedTo: string
+  mode: 'access' | 'trunk'
+  accessVlan: number
+  /** shutdown / no shutdown */
+  adminUp: boolean
+  /** стартовая конфигурация; `write memory` копирует в неё текущую */
+  saved: PortConfig
+}
+
+/** Интерфейс VLAN (SVI) — только у ядра. */
+export interface VlanInterface {
+  vlan: number
+  ip: string
+  mask: string
+  /** ip helper-address — ретрансляция DHCP */
+  helpers: string[]
+  adminUp: boolean
+}
+
+export interface SwitchLogEntry {
+  at: string
+  text: string
+}
+
+export interface DeviceHealth {
+  /** проценты */
+  cpu: number
+  memory: number
+  /** градусы Цельсия */
+  temperature: number
+  psu: 'ok' | 'fail'
+  /** время последней загрузки, ISO */
+  since: string
+}
+
+export interface NetSwitch {
+  hostname: string
+  role: 'access' | 'core'
+  vendor: string
+  model: string
+  serial: string
+  firmware: string
+  location: string
+  mgmtIp: string
+  vlans: Array<{ id: number; name: string }>
+  ports: SwitchPort[]
+  vlanInterfaces: VlanInterface[]
+  log: SwitchLogEntry[]
+  health: DeviceHealth
+}
+
+export interface Router {
+  hostname: string
+  vendor: string
+  model: string
+  serial: string
+  location: string
+  mgmtIp: string
+  wan: { isp: string; ip: string; up: boolean }
+  health: DeviceHealth
+}
+
+export interface Server {
+  hostname: string
+  roles: string[]
+  ip: string
+  os: string
+  location: string
+  health: DeviceHealth
+  services: Service[]
+}
+
+export interface NetPrinter {
+  hostname: string
+  vendor: string
+  model: string
+  ip: string
+  location: string
+  status: 'ready' | 'error' | 'offline'
+  /** остаток тонера, проценты */
+  tonerPct: number
+  paper: 'ok' | 'low' | 'empty'
+  /** заданий в очереди */
+  queue: number
 }
 
 export interface DnsServer {
@@ -236,5 +350,10 @@ export interface WorldState {
     dnsServers: DnsServer[]
     /** публичные адреса, отвечающие на ping при рабочем маршруте */
     publicHosts: string[]
+    /** серверная: всё, что техник видит, но чем не владеет */
+    switches: NetSwitch[]
+    routers: Router[]
+    servers: Server[]
+    printers: NetPrinter[]
   }
 }
