@@ -2,7 +2,8 @@ import { BRAND } from '../../../brand'
 import { field, continuation, joinLines } from '../format'
 import { recordChange } from '../../session/session'
 import type { CommandHandler, CommandContext, CommandResult } from '../types'
-import { linkOf, segmentOf } from '../../network/link'
+import { linkOf } from '../../network/link'
+import { acquireLease } from '../../network/dhcp'
 import type { Adapter } from '../../world/types'
 
 function adaptersOf(ctx: CommandContext): Adapter[] {
@@ -135,8 +136,6 @@ function doRenew(ctx: CommandContext): CommandResult {
   const a = adaptersOf(ctx)[0]
   if (!a) return { stdout: joinLines(header('Ethernet')), exitCode: 1 }
 
-  const seg = segmentOf(ctx.world, ctx.device)
-
   /**
    * Предусловие, ради которого всё и затевалось.
    *
@@ -146,10 +145,10 @@ function doRenew(ctx: CommandContext): CommandResult {
    * отличает диагностику от заучивания: очевидная команда не работает,
    * и надо понять почему.
    */
-  const holdsApipa = a.autoconfigured
-  const dhcpReachable = Boolean(seg?.dhcpHealthy) && linkOf(ctx.world, ctx.device)
+  const before = a.ip
+  const result = a.autoconfigured ? { ok: false as const } : acquireLease(ctx.world, ctx.device, ctx.clock)
 
-  if (holdsApipa || !dhcpReachable) {
+  if (!result.ok) {
     return {
       stdout: joinLines([
         ...header(a.name),
@@ -161,18 +160,7 @@ function doRenew(ctx: CommandContext): CommandResult {
     }
   }
 
-  const before = a.ip
-  const now = ctx.clock.now()
-  const lease = seg!.leasePool[0] ?? '10.20.14.88'
-
-  a.ip = lease
-  a.mask = '255.255.255.0'
-  a.gateway = seg!.gateway
-  a.dns = [...seg!.dns]
-  a.autoconfigured = false
-  a.leaseObtained = now.toISOString()
-  a.leaseExpires = new Date(now.getTime() + 24 * 3600 * 1000).toISOString()
-
+  const lease = result.ip
   recordChange(ctx.session, ctx.clock,
     `devices.${ctx.device}.adapters[0].ip`, before, lease, true)
 

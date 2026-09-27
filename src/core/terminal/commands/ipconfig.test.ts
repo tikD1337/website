@@ -127,6 +127,17 @@ describe('аренда', () => {
     ))
   })
 
+  /*
+    Найдено при проектировании среза 6: renew выдавал любой машине
+    первый адрес пула — 10.20.14.88, то есть адрес Priya Raman.
+  */
+  it('renew на другой машине возвращает её адрес, а не первый адрес пула', () => {
+    const other = { ...ctx, device: 'AL-LPT-0788' }
+    ipconfig(['/release'], other)
+    expect(ipconfig(['/renew'], other).exitCode).toBe(0)
+    expect(ctx.world.devices['AL-LPT-0788']!.adapters[0]!.ip).toBe('10.20.14.93')
+  })
+
   it('renew падает и после release, если DHCP сегмента лежит или линк опущен', () => {
     for (const patch of [
       { path: 'network.segments[vlan=vlan20].dhcpHealthy', value: false },
