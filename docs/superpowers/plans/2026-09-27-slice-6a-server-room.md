@@ -278,3 +278,31 @@
   ретрансляцию сломанной до конца смены: вторая линия чинит только по
   эскалации. Последующий тикет VLAN 20 станет непроходимым — это честное
   последствие неверного закрытия, но разбор о нём не говорит.
+
+
+## Решения исполнителя
+
+Всё, что решено по ходу вместо плана, — с ценой ошибки. Обзор всей
+ветки: отдельный агент дефектов не нашёл; краевые случаи консоли
+(несуществующий интерфейс, `do conf t`, VLAN 4095, подсказки `?` во
+всех режимах) проверены прогоном.
+
+- Task 1: Ruling: Adapter.linkUp kept as device-side physical flag; ports use desk jack IDs (DESK-3-14) as descriptions, not hostnames — finding a port by machine is investigation work — cost if wrong: descriptions change
+- Task 2: Ruling: plan's expected .94 for a forgotten MAC was wrong (.93 is genuinely free); test now reserves .93 for another MAC to exercise the reserved-address rule — cost if wrong: none
+- Task 4: Ruling: saveConfig without incident denies with dangerous action (same text as authorize) instead of routing through authorize — authorize's infra-change needs a port — cost if wrong: duplicated reason text
+- Task 5: Ruling: running-config byte count = sum(len+1) from '!' through 'end' (136/90); plan's 129/85 matched no stated formula — cost if wrong: two literals
+- Task 5: Ruling: added beyond brief for fidelity — `?` help with prefill, show version, show interfaces (all/detail with counters), IOS vlans 1002–1005, setPortMode/changeSvi (always deny except no-op mode), printer MAC in mac table (7 rows) — cost if wrong: extra surface to maintain
+- Task 6: Ruling: handoff reply gender-neutral «Хорошо, спасибо, буду ждать. Сообщите, когда заработает?» instead of plan's «Поняла…» — requesters of both new scenarios are men — cost if wrong: one string
+- Task 6: Ruling: «проверка на сетевом устройстве» in note = named command run on a device other than the ticket's machine (cmdline or canonical) or a named inspected infra object (device:/port:/svi:) — gradeNote has no world to tell switches apart — cost if wrong: a command on some other workstation would count
+- Task 6: Ruling: validateScenarios now dry-runs inject and onEscalate on a scratch world — lazy injection moved path typos to mid-shift — cost if wrong: startup cost of one world per scenario
+- Task 7: Ruling: createGameStore gets a 4th param `library` (default SCENARIOS) — the positive onEscalate test needs a scenario with a patch before T8 exists — cost if wrong: one test seam
+- Task 7: Ruling: console without an assigned ticket runs on a throwaway session (no incident) — after resolveTicket st.session still carries the closed incident, and its gate would allow the old port — cost if wrong: commands without a ticket leave no trace
+- Task 7: Ruling: onEscalate applies only on code 'escalate' (per spec) — closing the relay ticket as 'solved' leaves the relay broken for later VLAN 20 tickets — cost if wrong: an unsolvable APIPA later in the shift after a wrong closure
+- Task 8: Ruling: e2e `play` puts the target scenario first in the library — network scenarios share dhcp:vlan20 and would otherwise wait in the pool — cost if wrong: none
+- Task 8: Ruling: added objective alternatives beyond brief (find-port: mac table by interface/vlan; see-vlan: show running-config, show vlan, show interfaces status) — each genuinely shows the fact — cost if wrong: objectives slightly easier
+- Task 8: Ruling: relay onEscalate also restores the requester's adapter (Windows retries DHCP every 5 min from APIPA) — shared world stays consistent — cost if wrong: none
+- Task 8: Ruling: port-up lease now recorded as adapter ip change; note change-part extracts selector names (ports[name=Gi1/0/22]) — console path with port bounce otherwise had no concrete value to name — cost if wrong: slightly looser change part
+- Task 8: Ruling: directory office of t.lindqvist left stale (3-06) — HR data lags a move; ticket text names desk 3-22 — cost if wrong: none
+- Task 9: Ruling: added beyond brief — serverops.restartServerService (always deny) and store setSviHelper/openConsole — spec lists «перезапуск службы DHCP (отказ)» and «ip helper-address самому (отказ)» as traps; a boundary must be visible in the GUI too — cost if wrong: two buttons that always refuse
+- Task 9: Ruling: port card shows learned MAC, not connectedTo hostname — the switch knows addresses, not names; finding the machine is the investigation — cost if wrong: none
+- Task 9: Ruling: «Есть несохранённые изменения» shown in the ports tab — realistic for switch web UIs; makes the unsaved-VLAN trap less silent on the mouse path — cost if wrong: mouse path easier than console path
