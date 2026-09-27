@@ -22,9 +22,12 @@ export interface InfraResult {
   error?: string
   /** порт уже был в целевом состоянии — операция ничего не изменила */
   alreadyInState?: boolean
+  /** отказ шлюза: консоль печатает его как отказ в полномочиях */
+  denied?: boolean
 }
 
 const fail = (error: string): InfraResult => ({ ok: false, error })
+const refuse = (reason: string): InfraResult => ({ ok: false, error: `отказано: ${reason}`, denied: true })
 const LONG = 'gigabitethernet'
 
 /** `Gi1/0/22` → `GigabitEthernet1/0/22`, как печатают конфигурация и журнал. */
@@ -68,7 +71,7 @@ function gate(
   const d = authorize({ kind: 'infra-change', target, description }, world, session)
   if (d.decision === 'allow') return null
   addDangerousAction(session, clock, `${description}: ${target}`, d.reason)
-  return fail(`отказано: ${d.reason}`)
+  return refuse(d.reason)
 }
 
 const portPath = (sw: NetSwitch, port: SwitchPort, field: string) =>
@@ -167,7 +170,7 @@ export function saveConfig(
   if (!session.incident) {
     const reason = 'нет открытого тикета — изменения инфраструктуры делаются только по тикету'
     addDangerousAction(session, clock, `сохранение конфигурации: ${sw.hostname}`, reason)
-    return fail(`отказано: ${reason}`)
+    return refuse(reason)
   }
   for (const p of sw.ports) {
     p.saved = { accessVlan: p.accessVlan, adminUp: p.adminUp, description: p.description }
@@ -176,18 +179,54 @@ export function saveConfig(
 }
 
 /**
- * Ретрансляция DHCP на интерфейсе VLAN — конфигурация ядра, общая для
- * всех в этом VLAN. Первой линии она не принадлежит: отказ всегда.
+ * Режим порта: доступ или магистраль.
+ *
+ * Порт своей машины первая линия может переключить между VLAN, но
+ * превратить его в магистраль — значит решить, какие сети пойдут по
+ * этому кабелю. Это проект сети, а не заявка одного человека.
  */
-export function setHelper(
-  world: WorldState, swName: string, vlan: number, ip: string, add: boolean,
+export function setPortMode(
+  world: WorldState, swName: string, portName: string, mode: SwitchPort['mode'],
+  session: SessionLog, clock: Clock,
+): InfraResult {
+  const found = locate(world, swName, portName)
+  if ('error' in found) return fail(found.error)
+  const { sw, port } = found
+
+  const description = `смена режима порта на ${mode}`
+  const denied = gate(sw, port, description, world, session, clock)
+  if (denied) return denied
+  if (port.mode === mode) return { ok: true, alreadyInState: true }
+  return shared(world, `${sw.hostname}/${port.name}`, description, session, clock)
+}
+
+/**
+ * Любая правка интерфейса VLAN — адрес, ретрансляция, выключение,
+ * создание нового. Это маршрутизация целого сегмента, общая для всех в
+ * нём. Первой линии она не принадлежит: отказ всегда.
+ */
+export function changeSvi(
+  world: WorldState, swName: string, vlan: number, description: string,
   session: SessionLog, clock: Clock,
 ): InfraResult {
   const sw = findSwitch(world, swName)
   if (!sw) return fail(`коммутатор ${swName} не найден`)
+  return shared(world, `${sw.hostname}/Vlan${vlan}`, description, session, clock)
+}
+
+/** Ретрансляция DHCP — самый частый случай правки интерфейса VLAN. */
+export function setHelper(
+  world: WorldState, swName: string, vlan: number, ip: string, add: boolean,
+  session: SessionLog, clock: Clock,
+): InfraResult {
   const description = `${add ? 'добавление' : 'удаление'} ретрансляции DHCP ${ip} на Vlan${vlan}`
-  const d = authorize({ kind: 'shared-system', target: `${sw.hostname}/Vlan${vlan}`, description },
-    world, session)
-  addDangerousAction(session, clock, `${description}: ${sw.hostname}`, d.reason)
-  return fail(`отказано: ${d.reason}`)
+  return changeSvi(world, swName, vlan, description, session, clock)
+}
+
+function shared(
+  world: WorldState, target: string, description: string, session: SessionLog, clock: Clock,
+): InfraResult {
+  const d = authorize({ kind: 'shared-system', target, description }, world, session)
+  addDangerousAction(session, clock, `${description}: ${target}`, d.reason)
+  return refuse(d.reason)
 }

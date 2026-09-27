@@ -40,3 +40,18 @@ export function segmentOf(world: WorldState, host: string): NetworkSegment | und
   if (vlan === null) return undefined
   return world.network.segments.find(s => s.vlanId === vlan)
 }
+
+/**
+ * Состояние порта глазами коммутатора, как в `show interfaces status`.
+ *
+ * `connected` — порт включён и на том конце живой кабель. Машина,
+ * известная миру, отвечает за свой конец сама (`linkUp`); сервер или
+ * соседний коммутатор без модели машины считаются подключёнными.
+ */
+export function portStatus(world: WorldState, port: SwitchPort): 'connected' | 'notconnect' | 'disabled' {
+  if (!port.adminUp) return 'disabled'
+  if (!port.connectedTo) return 'notconnect'
+  const device = world.devices[port.connectedTo]
+  if (device && !device.adapters[0]?.linkUp) return 'notconnect'
+  return 'connected'
+}

@@ -218,7 +218,7 @@ export function seedNetwork(devices: Record<string, Device>) {
   const printers: NetPrinter[] = [
     {
       hostname: 'PRN-FL3-01', vendor: BRAND.vendors.printer[0], model: 'LaserStream M428',
-      ip: '10.20.40.21', location: 'Этаж 3, у переговорной 3.10',
+      ip: '10.20.40.21', mac: '00-1E-8F-3A-61-D4', location: 'Этаж 3, у переговорной 3.10',
       status: 'ready', tonerPct: 64, paper: 'ok', queue: 0,
     },
   ]

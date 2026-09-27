@@ -231,6 +231,8 @@ export interface NetPrinter {
   vendor: string
   model: string
   ip: string
+  /** виден коммутатору в таблице MAC, как и адрес машины */
+  mac: string
   location: string
   status: 'ready' | 'error' | 'offline'
   /** остаток тонера, проценты */
