@@ -2,6 +2,8 @@ import { apipaNoLease } from './net-apipa-no-lease'
 import { printSpoolerStopped } from './print-spooler-stopped'
 import { identityAccountLockout } from './identity-account-lockout'
 import { identityShareAccess } from './identity-share-access'
+import { wrongVlanPort } from './net-wrong-vlan-port'
+import { dhcpRelayMissing } from './net-dhcp-relay-missing'
 import type { Scenario } from '../core/scenario/types'
 
 /**
@@ -15,6 +17,8 @@ export const SCENARIOS: Scenario[] = [
   printSpoolerStopped,
   identityAccountLockout,
   identityShareAccess,
+  wrongVlanPort,
+  dhcpRelayMissing,
 ]
 
 export function scenarioFor(id: string): Scenario {

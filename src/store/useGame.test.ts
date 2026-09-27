@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createGameStore } from './useGame'
 import { apipaNoLease } from '../scenarios/net-apipa-no-lease'
+import { SCENARIOS } from '../scenarios'
 import { HANDOFF_REPLY } from '../core/dialogue/scripted'
 import type { Scenario } from '../core/scenario/types'
 
@@ -68,7 +69,7 @@ describe('смена', () => {
       close()
       closed++
     }
-    expect(closed).toBe(4)
+    expect(closed).toBe(SCENARIOS.length)
     expect(s().shiftExhausted).toBe(true)
 
     s().reset()

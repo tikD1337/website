@@ -37,11 +37,20 @@ function changedValues(session: SessionLog): string[] {
       сценарии. Без этого грейдер требовал бы от техника цитировать
       служебные строки вроде «running», что заметку только испортит.
     */
-    const parts = c.path.split('.')
+    const parts = c.path.replace(/\[[^\]]*\]/g, '').split('.')
     for (const p of parts.slice(2)) {
       if (p.length >= 3 && !['services', 'adapters', 'status'].includes(p)) {
         out.push(p.toLowerCase())
       }
+    }
+
+    /*
+      Имя объекта из селектора пути: `ports[name=Gi1/0/22]`,
+      `switches[hostname=SW-FL3-01]`. «Перевёл Gi1/0/22 в VLAN 20»
+      так же конкретно, как «запустил Spooler».
+    */
+    for (const m of c.path.matchAll(/\[[^=\]]+=([^\]]+)\]/g)) {
+      if (m[1]!.length >= 3) out.push(m[1]!.toLowerCase())
     }
   }
 

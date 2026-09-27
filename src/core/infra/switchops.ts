@@ -132,7 +132,12 @@ export function setPortAdmin(
   const host = port.connectedTo
   const adapter = world.devices[host]?.adapters[0]
   if (up && adapter?.dhcpEnabled && linkOf(world, host)) {
+    const before = adapter.ip
     if (!acquireLease(world, host, clock).ok) autoconfigure(world, host)
+    // Новый адрес — следствие действия техника, как и после ipconfig /renew.
+    if (adapter.ip !== before) {
+      recordChange(session, clock, `devices.${host}.adapters[0].ip`, before, adapter.ip, true)
+    }
   }
   return { ok: true }
 }

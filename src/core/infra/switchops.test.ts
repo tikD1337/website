@@ -59,6 +59,10 @@ describe('операции над коммутатором', () => {
     setPortAdmin(world, SW, 'Gi1/0/1', true, session, clock)
     expect(swLog().at(-1)).toBe('%LINK-3-UPDOWN: Interface GigabitEthernet1/0/1, changed state to up')
     expect(adapter()).toMatchObject({ ip: '10.20.14.88', autoconfigured: false })
+    // Новый адрес машины — следствие действия техника, и журнал изменений его знает.
+    expect(session.changes.at(-1)).toMatchObject({
+      path: 'devices.AL-LPT-0447.adapters[0].ip', before: '0.0.0.0', after: '10.20.14.88',
+    })
 
     setAccessVlan(world, SW, 'Gi1/0/1', 40, session, clock)
     setPortAdmin(world, SW, 'Gi1/0/1', false, session, clock)

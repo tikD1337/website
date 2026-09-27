@@ -13,10 +13,16 @@ import type { FetchLike } from './core/dialogue/openai'
  * операции и флаги проверены на своих слоях.
  */
 
-/** Стор с окном на всю библиотеку и взятым тикетом сценария. */
+/**
+ * Стор с окном на всю библиотеку и взятым тикетом сценария.
+ *
+ * Сценарий ставится первым: сетевые сценарии делят общий ресурс и в
+ * окне не встречаются, и без этого нужный мог бы ждать в пуле.
+ */
 const play = (scenarioId: string, iso: string, fetch?: FetchLike) => {
+  const library = [...SCENARIOS].sort((a, b) => Number(b.id === scenarioId) - Number(a.id === scenarioId))
   const g = createGameStore({ now: () => new Date(iso) }, fetch ? { fetch } : undefined,
-    SCENARIOS.length)
+    SCENARIOS.length, library)
   const s = () => g.getState()
   s().claimTicket(s().queue.tickets.find(t => t.scenarioId === scenarioId)!.number)
   if (fetch) s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
@@ -24,15 +30,19 @@ const play = (scenarioId: string, iso: string, fetch?: FetchLike) => {
 }
 type S = ReturnType<typeof play>
 
-const close = (s: S, note: string) => {
+const close = (s: S, note: string, code: 'solved' | 'escalate' = 'solved') => {
   s().saveResolutionNotes(note)
-  s().setResolutionCode('solved')
+  s().setResolutionCode(code)
   s().resolveTicket()
   return s().scorecard!
 }
 const unmet = (s: S) => s().scorecard!.objectives.filter(o => !o.met).map(o => o.id)
 const dim = (s: S, id: string) => s().scorecard!.dimensions.find(d => d.id === id)!
 const printed = (s: S) => s().terminalLines.map(l => l.text).join('\n')
+const cli = (s: S, sw: string, ...lines: string[]) => {
+  for (const l of lines) s().runSwitchCommand(sw, l)
+  return s().consoles[sw]!.lines.map(l => l.text).join('\n')
+}
 
 describe('APIPA', () => {
   /*
@@ -376,5 +386,132 @@ describe('доступ к папке отдела', () => {
     const card = finish(s)
     expect(s().session.askedFor).toEqual(['relogin'])
     expect(card.verdict).toBe('full')
+  })
+})
+
+describe('переезд в чужой VLAN', () => {
+  const at = '2026-09-12T09:20:00.000Z'
+  const SW = 'SW-FL3-01'
+  const port = (s: S) => s().world.network.switches[0]!.ports.find(p => p.name === 'Gi1/0/22')!
+  const NOTE = 'Tomas Lindqvist сообщил, что после переезда за стол 3-22 не открываются '
+    + 'сайты и почта. ipconfig /all показал самоназначенный адрес 169.254.126.34 без шлюза. '
+    + 'ipconfig /release и ipconfig /renew не помогли — DHCP не отвечает, эту версию исключил. '
+    + 'show mac address-table address f439.095b.7e22 нашёл машину на порту Gi1/0/22 в VLAN 40 — '
+    + 'это бывший порт принтера. Перевёл Gi1/0/22 в VLAN 20, передёрнул порт, машина получила '
+    + '10.20.14.93; конфигурацию сохранил write memory. Проверено: заявитель подтвердил, что '
+    + 'сайты открываются. При следующем переезде проверять VLAN порта розетки.'
+  const diagnose = (s: S) => {
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    s().runCommand('ipconfig /all')
+    s().runCommand('ipconfig /release')
+    s().runCommand('ipconfig /renew')
+    cli(s, SW, 'sh mac add add f439.095b.7e22', 'enable', 'sh run int gi1/0/22')
+  }
+
+  it('образцовый проход консолью: MAC → порт → VLAN → сохранение', () => {
+    const s = play('net-wrong-vlan-port', at)
+    diagnose(s)
+    cli(s, SW, 'conf t', 'int gi1/0/22', 'switchport access vlan 20', 'shutdown', 'no shutdown', 'end', 'wr')
+    s().confirmWithUser()
+    const card = close(s, NOTE)
+
+    expect(unmet(s)).toEqual([])
+    expect(card.silentFaults).toEqual([])
+    expect(card.note.parts.filter(p => !p.earned).map(p => p.id)).toEqual([])
+    expect(card.verdict).toBe('full')
+    expect(s().world.devices['AL-LPT-0788']!.adapters[0]!.ip).toBe('10.20.14.93')
+  })
+
+  /*
+    Развилка сценария: выглядит как APIPA, но в VLAN 40 DHCP нет, и
+    release + renew не помогают. Ответ на коммутаторе, а не на машине.
+  */
+  it('renew без смены VLAN не помогает — заявитель не подтверждает', () => {
+    const s = play('net-wrong-vlan-port', at)
+    diagnose(s)
+    expect(printed(s)).toContain('unable to contact your DHCP server')
+    s().confirmWithUser()
+    expect(s().session.flags.userConfirmed).toBe(false)
+  })
+
+  /* Несохранённая смена VLAN переживёт только до перезагрузки коммутатора. */
+  it('VLAN сменён без сохранения — тихая поломка', () => {
+    const s = play('net-wrong-vlan-port', at)
+    diagnose(s)
+    cli(s, SW, 'conf t', 'int gi1/0/22', 'sw acc vl 20', 'shut', 'no shut', 'end')
+    s().confirmWithUser()
+    const card = close(s, NOTE)
+    expect(card.silentFaults).toEqual([expect.stringContaining('не сохранена')])
+    expect(card.verdict).toBe('fail')
+    expect(port(s).saved.accessVlan).toBe(40)
+  })
+
+  /* Карточка порта в серверной — доказательство наравне с командой. */
+  it('проход мышью закрывает те же цели', () => {
+    const s = play('net-wrong-vlan-port', at)
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    s().runCommand('ipconfig /all')
+    s().inspectObject('port', `${SW}/Gi1/0/22`)
+    expect(s().setPortVlan(SW, 'Gi1/0/22', 20)).toEqual({ ok: true })
+    s().setPortEnabled(SW, 'Gi1/0/22', false)
+    s().setPortEnabled(SW, 'Gi1/0/22', true)
+    s().saveSwitchConfig(SW)
+    s().confirmWithUser()
+    const card = close(s, NOTE)
+    expect(unmet(s)).toEqual([])
+    expect(card.silentFaults).toEqual([])
+  })
+})
+
+describe('пропавшая ретрансляция', () => {
+  const at = '2026-09-10T08:40:00.000Z'
+  const helpers = (s: S) => s().world.network.switches[1]!.vlanInterfaces.find(v => v.vlan === 20)!.helpers
+  const NOTE = 'Dumisani Mbeki сообщил, что с утра нет сети — не открываются ни почта, ни сайты; '
+    + 'у соседей по этажу то же самое. ipconfig /all показал самоназначенный адрес 169.254.32.122. '
+    + 'ipconfig /release и ipconfig /renew не помогли — DHCP не отвечает. В серверной DHCP01 '
+    + 'исправен, но запросов из VLAN 20 нет. На CR-01 show running-config interface vlan20: '
+    + 'ip helper-address отсутствует, в журнале CR-01 правка конфигурации в 02:14. Передаю '
+    + 'сетевой группе для восстановления ретрансляции на Vlan20, заявитель предупреждён.'
+  const investigate = async (s: S) => {
+    s().verifyRequester('office', '4-01')
+    s().runCommand('ipconfig /all')
+    s().runCommand('ipconfig /release')
+    s().runCommand('ipconfig /renew')
+    s().callTo('d.mbeki')
+    await s().say('У коллег рядом так же?')
+    s().inspectObject('device', 'DHCP01')
+    cli(s, 'CR-01', 'enable', 'sh run int vlan 20', 'sh log')
+  }
+
+  /*
+    Первая линия находит причину, но починить её не может и не должна:
+    это конфигурация ядра. Образцовый исход — эскалация с доказательствами
+    и предупреждённым заявителем.
+  */
+  it('образцовый проход: доказательства, передача, предупреждение — эскалация на full', async () => {
+    const s = play('net-dhcp-relay-missing', at)
+    await investigate(s)
+    expect(s().consoles['CR-01']!.lines.some(l => l.text.includes('Sep 10 02:14:07'))).toBe(true)
+    s().informRequester()
+    const card = close(s, NOTE, 'escalate')
+
+    expect(unmet(s)).toEqual([])
+    expect(card.note.score).toBe(10)
+    expect(card.dimensions.filter(d => d.score < 10).map(d => `${d.id}=${d.score}`)).toEqual([])
+    expect(card.verdict).toBe('full')
+    // Вторая линия починила после передачи.
+    expect(helpers(s)).toEqual(['10.20.10.5'])
+  })
+
+  it('ретрансляция своими руками — отказ, полномочия 0, вердикт fail', async () => {
+    const s = play('net-dhcp-relay-missing', at)
+    await investigate(s)
+    expect(cli(s, 'CR-01', 'conf t', 'int vlan 20', 'ip helper-address 10.20.10.5'))
+      .toMatch(/Command authorization failed\.$/)
+    expect(helpers(s)).toEqual([])
+    s().informRequester()
+    const card = close(s, NOTE, 'escalate')
+    expect(dim(s, 'authority').score).toBe(0)
+    expect(card.verdict).toBe('fail')
   })
 })

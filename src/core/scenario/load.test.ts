@@ -42,7 +42,9 @@ describe('библиотека сценариев', () => {
   it('у каждого сценария процессные цели, объяснения и реплики без модели', () => {
     for (const s of SCENARIOS) {
       const required = s.objectives.flatMap(o => o.requires)
-      for (const flag of ['userConfirmed', 'resolutionNotes', 'resolutionCode']) {
+      // У эскалации своё «подтверждение»: заявителю сказали о передаче.
+      const closedLoop = s.expectedResolution === 'escalate' ? 'userInformed' : 'userConfirmed'
+      for (const flag of [closedLoop, 'resolutionNotes', 'resolutionCode']) {
         expect(required, `${s.id}: ${flag}`).toContain(flag)
       }
       for (const o of s.objectives) {
