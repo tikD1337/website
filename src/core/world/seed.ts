@@ -44,7 +44,7 @@ function baseServices(): Service[] {
     },
     {
       name: 'WinDefend',
-      displayName: 'Microsoft Defender Antivirus Service',
+      displayName: 'Vantage Defender Antivirus Service',
       status: 'running',
       startType: 'auto',
       protected: true,

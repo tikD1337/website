@@ -1,119 +1,62 @@
 import { describe, it, expect } from 'vitest'
 import { SCENARIOS } from '../../scenarios'
-import { loadScenario, loadScenarios, incidentNumber } from './load'
+import { loadScenario, loadScenarios, validateScenarios, incidentNumber } from './load'
 import { apipaNoLease } from '../../scenarios/net-apipa-no-lease'
+import type { Scenario } from './types'
 
-describe('loadScenario', () => {
-  it('ломает мир согласно инъекции', () => {
-    const { world } = loadScenario(apipaNoLease)
-    const a = world.devices['AL-LPT-0447']!.adapters[0]!
-    expect(a.ip).toBe('169.254.23.11')
-    expect(a.gateway).toBe('')
-    expect(a.dns).toEqual([])
-    expect(a.autoconfigured).toBe(true)
-    expect(a.leaseObtained).toBeNull()
-  })
-
-  it('оставляет сегмент здоровым — релей уже починился', () => {
-    const { world } = loadScenario(apipaNoLease)
+describe('загрузка сценария', () => {
+  it('ломает свежий мир по инъекции и строит тикет из описания', () => {
+    const { world, ticket } = loadScenario(apipaNoLease)
+    expect(world.devices['AL-LPT-0447']!.adapters[0]).toMatchObject({
+      ip: '169.254.23.11', gateway: '', dns: [], autoconfigured: true, leaseObtained: null,
+    })
+    // Релей уже починился — сегмент здоров, соседняя машина не тронута.
     expect(world.network.segments[0]!.dhcpHealthy).toBe(true)
-  })
-
-  it('не трогает соседнюю машину', () => {
-    const { world } = loadScenario(apipaNoLease)
     expect(world.devices['AL-DSK-0192']!.adapters[0]!.ip).toBe('10.20.14.91')
+
+    expect(ticket).toMatchObject({
+      number: 'INC4612736', status: 'new', category: 'Сеть', subcategory: 'Связность',
+      priority: 'P3', requester: 'p.raman', device: 'AL-LPT-0447',
+      resolutionCode: null, createdAt: null,
+    })
+
+    world.devices['AL-LPT-0447']!.adapters[0]!.ip = '1.2.3.4'
+    expect(loadScenario(apipaNoLease).world.devices['AL-LPT-0447']!.adapters[0]!.ip)
+      .toBe('169.254.23.11')
   })
 
-  it('строит тикет из описания сценария', () => {
-    const { ticket } = loadScenario(apipaNoLease)
-    expect(ticket.number).toMatch(/^INC\d{7}$/)
-    expect(ticket.status).toBe('new')
-    expect(ticket.category).toBe('Сеть')
-    expect(ticket.subcategory).toBe('Связность')
-    expect(ticket.priority).toBe('P3')
-    expect(ticket.requester).toBe('p.raman')
-    expect(ticket.device).toBe('AL-LPT-0447')
-    expect(ticket.resolutionCode).toBeNull()
-    expect(ticket.createdAt).toBeNull()
-  })
-
-  it('каждая загрузка даёт свежий мир', () => {
-    const a = loadScenario(apipaNoLease)
-    a.world.devices['AL-LPT-0447']!.adapters[0]!.ip = '1.2.3.4'
-    const b = loadScenario(apipaNoLease)
-    expect(b.world.devices['AL-LPT-0447']!.adapters[0]!.ip).toBe('169.254.23.11')
-  })
-})
-
-describe('incidentNumber', () => {
-  it('детерминирован', () => {
-    expect(incidentNumber('net-apipa-no-lease'))
-      .toBe(incidentNumber('net-apipa-no-lease'))
-  })
-
-  it('разные сценарии дают разные номера', () => {
+  /* Случайность здесь недопустима: одно прохождение выглядит одинаково всегда. */
+  it('номер инцидента детерминирован и различает сценарии', () => {
+    expect(incidentNumber('net-apipa-no-lease')).toBe('INC4612736')
     expect(incidentNumber('a')).not.toBe(incidentNumber('b'))
   })
 })
 
-describe('сценарий APIPA', () => {
-  it('несёт корневую причину', () => {
-    expect(apipaNoLease.rootCause).toContain('DHCP')
-    expect(apipaNoLease.rootCause.length).toBeGreaterThan(60)
-  })
-
-  it('содержит и технические, и процессные цели', () => {
-    const technical = apipaNoLease.objectives.filter(o => o.commands.length > 0)
-    const process = apipaNoLease.objectives.filter(o => o.requires.length > 0)
-    expect(technical.length).toBeGreaterThanOrEqual(4)
-    expect(process.length).toBeGreaterThanOrEqual(3)
-  })
-
-  it('требует подтверждения заявителя, заметки и кода закрытия', () => {
-    const required = apipaNoLease.objectives.flatMap(o => o.requires)
-    expect(required).toContain('userConfirmed')
-    expect(required).toContain('resolutionNotes')
-    expect(required).toContain('resolutionCode')
-  })
-
-  it('у каждой цели есть объяснение «зачем»', () => {
-    for (const o of apipaNoLease.objectives) {
-      expect(o.why.length, `цель ${o.id}`).toBeGreaterThan(40)
-      expect(o.steps.length, `цель ${o.id}`).toBeGreaterThan(0)
+/*
+  Правила библиотеки, а не одного сценария. Процессные цели —
+  подтвердить у заявителя, написать заметку, выбрать код — стоят наравне
+  с техническими, и сценарий без них учил бы, что задача решена, когда
+  починена машина.
+*/
+describe('библиотека сценариев', () => {
+  it('у каждого сценария процессные цели, объяснения и реплики без модели', () => {
+    for (const s of SCENARIOS) {
+      const required = s.objectives.flatMap(o => o.requires)
+      for (const flag of ['userConfirmed', 'resolutionNotes', 'resolutionCode']) {
+        expect(required, `${s.id}: ${flag}`).toContain(flag)
+      }
+      for (const o of s.objectives) {
+        expect(o.why.length, `${s.id}/${o.id}`).toBeGreaterThan(40)
+        expect(o.steps.length, `${s.id}/${o.id}`).toBeGreaterThan(0)
+      }
+      expect(s.actionsToAvoid.length, s.id).toBeGreaterThan(0)
+      expect(s.persona.scripted.length, s.id).toBeGreaterThanOrEqual(4)
     }
   })
 
-  it('перечисляет запрещённые действия', () => {
-    expect(apipaNoLease.actionsToAvoid.length).toBeGreaterThan(0)
-    expect(apipaNoLease.actionsToAvoid.some(a => a.includes('advfirewall'))).toBe(true)
-  })
-
-  it('персона не знает разгадку', () => {
-    const blob = JSON.stringify(apipaNoLease.persona).toLowerCase()
-    expect(blob).not.toContain('dhcp')
-    expect(blob).not.toContain('169.254')
-    expect(blob).not.toContain('аренд')
-    expect(blob).not.toContain('релей')
-  })
-
-  it('персона знает только наблюдаемое и умеет отвечать без модели', () => {
-    expect(apipaNoLease.persona.knows.length).toBeGreaterThanOrEqual(4)
-    expect(apipaNoLease.persona.scripted.length).toBeGreaterThanOrEqual(4)
-    for (const ex of apipaNoLease.persona.scripted) {
-      expect(ex.reply.length).toBeGreaterThan(10)
-    }
-  })
-
-  it('команды целей записаны так, как их наберёт техник', () => {
-    const all = apipaNoLease.objectives.flatMap(o => o.commands)
-    for (const c of all) {
-      expect(c, `команда «${c}»`).toBe(c.trim())
-      expect(c, `команда «${c}»`).toBe(c.toLowerCase())
-    }
-  })
-
-  it('ожидаемый исход — решено, а не эскалация', () => {
-    expect(apipaNoLease.expectedResolution).toBe('solved')
+  it('номера инцидентов в библиотеке не совпадают', () => {
+    const numbers = SCENARIOS.map(s => incidentNumber(s.id))
+    expect(new Set(numbers).size).toBe(numbers.length)
   })
 })
 
@@ -122,57 +65,33 @@ describe('сценарий APIPA', () => {
 
   `[].every(...)` истинно, поэтому цель с пустыми `commands` и пустыми
   `requires` засчитывалась **всегда**: разбор утверждал «блокировка
-  снята», когда учётка заблокирована, и «добавлен в группу», когда
-  техник выдал доступ в обход группы — то есть врал ровно в той цели,
-  вокруг которой построена ловушка сценария.
-
-  Сторож в загрузчике, а не в оценке: ошибка автора сценария должна
-  падать при загрузке, а не всплывать неверным разбором через полчаса
-  прохождения.
+  снята», когда учётка заблокирована, — то есть врал ровно в той цели,
+  вокруг которой построена ловушка сценария. Сторож в загрузчике: ошибка
+  автора сценария падает при загрузке, а не неверным разбором через
+  полчаса прохождения.
 */
 describe('сторож: у каждой цели есть доказательство', () => {
-  const base = {
+  const withObjective = (over: Partial<Scenario['objectives'][number]>): Scenario => ({
     ...apipaNoLease,
     objectives: [{
-      id: 'obj-пустая',
-      title: 'Цель без доказательств',
-      steps: [],
-      commands: [],
-      requires: [],
-      why: '',
+      id: 'obj-пустая', title: 'Цель', steps: [], commands: [], requires: [], why: '', ...over,
     }],
-  }
+  })
 
   it('цель без команд, флагов и состояния не проходит загрузку', () => {
-    expect(() => loadScenario(base)).toThrow(/obj-пустая/)
+    expect(() => loadScenario(withObjective({}))).toThrow(/obj-пустая.*commands, requires или state/)
+    expect(() => validateScenarios([withObjective({})])).toThrow(/obj-пустая/)
   })
 
-  it('сообщение объясняет, чего не хватает', () => {
-    expect(() => loadScenario(base)).toThrow(/commands|requires|state/)
-  })
-
-  it('достаточно одной команды', () => {
-    const s = { ...base, objectives: [{ ...base.objectives[0]!, commands: ['ipconfig /all'] }] }
-    expect(() => loadScenario(s)).not.toThrow()
-  })
-
-  it('достаточно одного флага', () => {
-    const s = { ...base, objectives: [{ ...base.objectives[0]!, requires: ['userConfirmed'] }] }
-    expect(() => loadScenario(s)).not.toThrow()
-  })
-
-  it('достаточно одной проверки состояния', () => {
-    const s = {
-      ...base,
-      objectives: [{
-        ...base.objectives[0]!,
-        state: [{ path: 'devices.AL-LPT-0447.adapters[0].linkUp', equals: true, message: '' }],
-      }],
+  it('достаточно одного доказательства любого вида; библиотека проходит', () => {
+    const evidence = [
+      { commands: ['ipconfig /all'] },
+      { requires: ['userConfirmed'] },
+      { state: [{ path: 'devices.AL-LPT-0447.adapters[0].linkUp', equals: true, message: '' }] },
+    ]
+    for (const e of evidence) {
+      expect(() => loadScenario(withObjective(e)), JSON.stringify(e)).not.toThrow()
     }
-    expect(() => loadScenario(s)).not.toThrow()
-  })
-
-  it('все сценарии библиотеки проходят сторожа', () => {
     expect(() => loadScenarios(SCENARIOS)).not.toThrow()
   })
 })

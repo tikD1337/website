@@ -20,71 +20,46 @@ function progress(records: TicketRecord[]): Progress {
   return { version: 1, records }
 }
 
-describe('разбор прочитанного из хранилища', () => {
-  it('валидный прогресс ошибок не даёт', () => {
-    expect(validateProgress(progress([rec()]))).toEqual([])
-  })
+const codes = (raw: unknown) => validateProgress(raw as never).map(e => e.code)
 
-  it('пустой прогресс тоже валиден', () => {
+describe('разбор прочитанного из хранилища', () => {
+  it('валидный прогресс, в том числе пустой, ошибок не даёт', () => {
+    expect(validateProgress(progress([rec()]))).toEqual([])
     expect(validateProgress(progress([]))).toEqual([])
   })
 
-  it('чужая версия схемы — одна ошибка и сразу', () => {
-    const errors = validateProgress({ version: 2, records: [] } as unknown as Progress)
-    expect(errors.map(e => e.code)).toEqual(['bad_version'])
+  it('называет, что именно испорчено', () => {
+    // Чужая версия схемы — одна ошибка и сразу: следующая не станет молча читать чужое.
+    expect(codes({ version: 2, records: [] })).toEqual(['bad_version'])
+
+    const noNumber = rec()
+    delete (noNumber as Partial<TicketRecord>).number
+    expect(codes(progress([noNumber]))).toContain('missing_number')
+    expect(codes(progress([rec({ id: 'SH-1:ROGUE' })]))).toContain('bad_id')
+
+    const noPoints = rec()
+    ;(noPoints.card as Partial<typeof noPoints.card>).points = undefined as never
+    expect(codes(progress([noPoints]))).toContain('bad_points')
   })
 
-  it('запись без обязательного поля помечается', () => {
-    const r = rec()
-    delete (r as Partial<TicketRecord>).number
-    const errors = validateProgress(progress([r]))
-    expect(errors.map(e => e.code)).toContain('missing_number')
-  })
-
-  it('id, не совпадающий со shiftId:номер, — это другой id', () => {
-    const r = rec({ id: 'SH-1:ROGUE' })
-    const errors = validateProgress(progress([r]))
-    expect(errors.map(e => e.code)).toContain('bad_id')
-  })
-
-  it('карточка без очков не проходит', () => {
-    const r = rec()
-    ;(r.card as Partial<typeof r.card>).points = undefined as never
-    const errors = validateProgress(progress([r]))
-    expect(errors.map(e => e.code)).toContain('bad_points')
-  })
-
-  it('мусор вместо прогресса ловится без падения', () => {
-    const errors = validateProgress({ junk: true } as unknown as Progress)
-    expect(errors.length).toBeGreaterThan(0)
-  })
-})
-/**
- * Прочитанное из хранилища — не `Progress`, пока не проверено.
- *
- * Данные приходят из IndexedDB: их могла записать прошлая версия,
- * могло повредить прерванное обновление, мог подменить кто угодно
- * через консоль браузера. Проверка обязана пережить любую форму и
- * вернуть список ошибок, а не бросить: исключение здесь возникает
- * внутри колбэка запроса, внешний `try/catch` его не ловит, и загрузка
- * повисает навсегда — история так и остаётся в «Загружается…».
- */
-describe('испорченное хранилище', () => {
-  const survives = (raw: unknown) => {
-    expect(() => validateProgress(raw as never)).not.toThrow()
-    expect(validateProgress(raw as never).length).toBeGreaterThan(0)
-  }
-
-  it('версия есть, записей нет', () => survives({ version: 1 }))
-  it('записи не массив', () => survives({ version: 1, records: 'нет' }))
-  it('записи — null', () => survives({ version: 1, records: null }))
-  it('запись — null', () => survives({ version: 1, records: [null] }))
-  it('запись — строка', () => survives({ version: 1, records: ['мусор'] }))
-  it('вместо объекта — null', () => survives(null))
-  it('вместо объекта — строка', () => survives('мусор'))
-  it('вместо объекта — массив', () => survives([]))
-
-  it('карточка — null', () => {
-    survives({ version: 1, records: [{ ...rec(), card: null }] })
+  /**
+   * Прочитанное из хранилища — не `Progress`, пока не проверено.
+   *
+   * Его могла записать прошлая версия, повредить прерванное обновление,
+   * подменить кто угодно из консоли. Проверка обязана пережить любую
+   * форму: исключение возникает внутри колбэка запроса, внешний
+   * `try/catch` его не ловит, и загрузка повисает навсегда.
+   */
+  it('переживает любую форму мусора и не бросает', () => {
+    const junk: unknown[] = [
+      null, 'мусор', [], { junk: true },
+      { version: 1 }, { version: 1, records: 'нет' }, { version: 1, records: null },
+      { version: 1, records: [null] }, { version: 1, records: ['мусор'] },
+      { version: 1, records: [{ ...rec(), card: null }] },
+    ]
+    for (const raw of junk) {
+      expect(() => validateProgress(raw as never), JSON.stringify(raw)).not.toThrow()
+      expect(codes(raw).length, JSON.stringify(raw)).toBeGreaterThan(0)
+    }
   })
 })

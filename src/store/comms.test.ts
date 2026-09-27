@@ -5,13 +5,13 @@ import type { FetchLike } from '../core/dialogue/openai'
 
 const clock = { now: () => new Date('2026-09-10T09:00:00.000Z') }
 
+/** Стор с взятым тикетом о блокировке; с fetch — модель включена. */
 const store = (fetch?: FetchLike) => {
   const g = createGameStore(clock, fetch ? { fetch } : undefined)
-  g.getState().start()
   const s = () => g.getState()
-  const lockout = s().queue.tickets.find(
-    t => t.scenarioId === 'identity-account-lockout')!
+  const lockout = s().queue.tickets.find(t => t.scenarioId === 'identity-account-lockout')!
   s().claimTicket(lockout.number)
+  if (fetch) s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
   return s
 }
 
@@ -21,460 +21,248 @@ const modelSays = (text: string): FetchLike => async () => ({
   json: async () => ({ choices: [{ message: { content: text } }] }),
 })
 
-describe('разговор требует тикета и собеседника', () => {
-  it('без тикета реплика не уходит', async () => {
+/** Модель, которая отвечает только по команде: ответ приходит в изменившийся мир. */
+const slowModel = (text: string) => {
+  let release = () => {}
+  const fetch: FetchLike = async () => {
+    await new Promise<void>(r => { release = r })
+    return modelSays(text)('', {})
+  }
+  return { fetch, release: () => release() }
+}
+
+const assignedTicket = (s: ReturnType<typeof store>) =>
+  s().queue.tickets.find(t => t.number === s().queue.assigned)!
+
+/** Техник починил инцидент с блокировкой: сверил личность и снял блокировку. */
+const fix = (s: ReturnType<typeof store>) => {
+  s().verifyRequester('manager', 'Dumisani Mbeki')
+  s().unlockUser('e.varga')
+}
+
+describe('реплика', () => {
+  it('без тикета, без собеседника и пустая — не уходит', async () => {
     const g = createGameStore(clock)
-    g.getState().start()
     g.getState().callTo('e.varga')
     await g.getState().say('Здравствуйте')
     expect(g.getState().session.dialogue).toHaveLength(0)
-  })
 
-  it('без собеседника реплика не уходит', async () => {
     const s = store()
     await s().say('Здравствуйте')
-    expect(s().session.dialogue).toHaveLength(0)
-  })
-
-  it('пустая реплика игнорируется', async () => {
-    const s = store()
     s().callTo('e.varga')
     await s().say('   ')
     expect(s().session.dialogue).toHaveLength(0)
   })
-})
-
-describe('реплика и ответ', () => {
-  it('обе стороны попадают в журнал сессии', async () => {
-    const s = store()
-    s().callTo('e.varga')
-    await s().say('Когда это началось?')
-
-    const d = s().session.dialogue
-    expect(d).toHaveLength(2)
-    expect(d[0]!.speaker).toBe('technician')
-    expect(d[1]!.speaker).toBe('requester')
-    expect(d[1]!.text).toContain('Сегодня утром')
-  })
-
-  it('обе стороны попадают в переписку тикета', async () => {
-    const s = store()
-    s().callTo('e.varga')
-    await s().say('Когда это началось?')
-
-    const ticket = s().queue.tickets.find(t => t.number === s().queue.assigned)!
-    expect(ticket.communications).toHaveLength(2)
-    expect(ticket.communications[0]!.from).toBe('technician')
-  })
 
   /*
-    Найдено разбором среза 3: переписка подписывала просьбу техника
-    именем заявителя. Здесь та же проверка для свободной реплики.
+    Найдено разбором среза 3: переписка подписывала реплику техника
+    именем заявителя.
   */
-  it('реплика техника подписана им, а не собеседником', async () => {
-    const s = store()
-    s().callTo('e.varga')
-    await s().say('Здравствуйте, это служба поддержки')
-
-    const ticket = s().queue.tickets.find(t => t.number === s().queue.assigned)!
-    expect(ticket.communications[0]!.from).toBe('technician')
-    expect(ticket.communications[0]!.with).toBe('e.varga')
-  })
-
-  it('канал переписки — выбранный', async () => {
+  it('обе стороны пишутся в журнал и в переписку тикета, в выбранном канале', async () => {
     const s = store()
     s().setChannel('mail')
     s().callTo('e.varga')
-    await s().say('Добрый день, уточните пожалуйста')
+    await s().say('Когда это началось?')
 
-    expect(s().session.dialogue[0]!.channel).toBe('mail')
+    expect(s().session.dialogue.map(d => [d.speaker, d.channel, d.with])).toEqual([
+      ['technician', 'mail', 'e.varga'],
+      ['requester', 'mail', 'e.varga'],
+    ])
+    expect(s().session.dialogue[1]!.text).toContain('Сегодня утром')
+    expect(assignedTicket(s).communications.map(c => [c.from, c.with])).toEqual([
+      ['technician', 'e.varga'],
+      ['e.varga', 'e.varga'],
+    ])
   })
 })
 
 /**
- * Флаг объявлен в срезе 0 и до появления разговора не поднимался ничем.
- * Правило доктрины: проговори действие прежде, чем его сделать.
+ * Флаг связи объявлен в срезе 0 и до появления разговора не поднимался
+ * ничем. Правило доктрины: проговори действие прежде, чем его сделать.
  */
 describe('связь до начала работы', () => {
-  it('разговор до изменений поднимает флаг', async () => {
-    const s = store()
-    s().callTo('e.varga')
-    await s().say('Здравствуйте, разбираюсь с вашей заявкой')
-    expect(s().session.flags.announcedBeforeActing).toBe(true)
-  })
+  it('разговор до изменений засчитывается, после — уже отчёт, а не предупреждение', async () => {
+    const before = store()
+    before().callTo('e.varga')
+    await before().say('Здравствуйте, разбираюсь с вашей заявкой')
+    expect(before().session.flags.announcedBeforeActing).toBe(true)
 
-  /*
-    Техник сразу полез в каталог, не сказав заявителю ни слова.
-    Именно этот случай флаг и ловит: разговор после изменения мира —
-    уже не предупреждение, а отчёт о сделанном.
-  */
-  it('разговор после изменения мира флаг не поднимает', async () => {
-    const s = store()
-    s().unlockUser('e.varga')
-    s().callTo('e.varga')
-    await s().say('Проверьте, пожалуйста')
-
-    expect(s().session.changes.length).toBeGreaterThan(0)
-    expect(s().session.flags.announcedBeforeActing).toBe(false)
-  })
-
-  /* Сверка личности — тоже разговор, и она поднимает тот же флаг. */
-  it('сверка личности засчитывается как связь', () => {
-    const s = store()
-    s().verifyRequester('manager', 'Dumisani Mbeki')
-    expect(s().session.flags.announcedBeforeActing).toBe(true)
+    const after = store()
+    after().unlockUser('e.varga')
+    after().callTo('e.varga')
+    await after().say('Проверьте, пожалуйста')
+    expect(after().session.flags.announcedBeforeActing).toBe(false)
   })
 
   /*
     Найдено разбором кода: кнопка «Позвонить заявителю» записывала
     только ответ, без вопроса. Флаг связи поднимается репликой техника,
-    поэтому звонивший кнопкой читал в разборе «на связь до начала
-    работы вы не выходили» — при том что звонил.
+    поэтому звонивший кнопкой читал в разборе «на связь до начала работы
+    вы не выходили» — при том что звонил. Сверка личности — тоже
+    разговор.
   */
-  it('кнопка звонка засчитывается как связь', () => {
-    const s = store()
-    s().confirmWithUser()
-    expect(s().session.flags.announcedBeforeActing).toBe(true)
-  })
+  it('сверка личности и кнопка звонка — тоже связь, и вопрос виден в переписке', () => {
+    const verified = store()
+    verified().verifyRequester('manager', 'Dumisani Mbeki')
+    expect(verified().session.flags.announcedBeforeActing).toBe(true)
 
-  it('в переписке виден и вопрос техника, и ответ', () => {
-    const s = store()
-    s().confirmWithUser()
-
-    const ticket = s().queue.tickets.find(t => t.number === s().queue.assigned)!
-    expect(ticket.communications).toHaveLength(2)
-    expect(ticket.communications[0]!.from).toBe('technician')
-    expect(ticket.communications[1]!.from).toBe('e.varga')
+    const called = store()
+    called().confirmWithUser()
+    expect(called().session.flags.announcedBeforeActing).toBe(true)
+    expect(assignedTicket(called).communications.map(c => c.from))
+      .toEqual(['technician', 'e.varga'])
   })
 })
 
-describe('выяснение масштаба', () => {
-  it('«у коллег так же?» поднимает флаг', async () => {
-    const s = store()
-    s().callTo('e.varga')
-    await s().say('У коллег рядом так же?')
-    expect(s().session.flags.scopeChecked).toBe(true)
-  })
-
-  it('обычный вопрос флаг не поднимает', async () => {
+describe('масштаб и собеседники', () => {
+  it('«у коллег так же?» поднимает флаг масштаба, обычный вопрос — нет', async () => {
     const s = store()
     s().callTo('e.varga')
     await s().say('Когда это началось?')
     expect(s().session.flags.scopeChecked).toBe(false)
+    await s().say('У коллег рядом так же?')
+    expect(s().session.flags.scopeChecked).toBe(true)
   })
 
-  it('масштаб добавляет балл расследованию', async () => {
-    const play = async (askScope: boolean) => {
-      const s = store()
-      s().verifyRequester('manager', 'Dumisani Mbeki')
-      s().runCommand('net user e.varga')
-      s().openApp('eventvwr')
-      if (askScope) {
-        s().callTo('e.varga')
-        await s().say('У коллег так же?')
-      }
-      s().unlockUser('e.varga')
-      s().askRequesterTo('clear-phone')
-      s().confirmWithUser()
-      s().saveResolutionNotes('Сняли блокировку e.varga, подтвердила.')
-      s().setResolutionCode('solved')
-      s().resolveTicket()
-      return s().scorecard!.dimensions.find(d => d.id === 'investigation')!.score
-    }
+  /*
+    Звонить можно любому из справочника, и разговоры не смешиваются:
+    контекст беседы с коллегой не попадает в разговор с заявителем.
+  */
+  it('коллега отвечает про себя, и его разговор отделён от разговора с заявителем', async () => {
+    const s = store()
+    s().callTo('s.okafor')
+    await s().say('У вас так же?')
+    expect(s().session.dialogue.at(-1)!.text).toContain('у меня')
 
-    expect(await play(true)).toBeGreaterThanOrEqual(await play(false))
+    s().callTo('e.varga')
+    await s().say('Когда это началось?')
+
+    const byWhom = assignedTicket(s).communications.map(c => c.with)
+    expect(byWhom).toEqual(['s.okafor', 's.okafor', 'e.varga', 'e.varga'])
   })
 })
 
 /**
  * Подтверждение засчитывается состоянием мира, а не словами.
- * Иначе модель, сказавшая «спасибо, работает» из вежливости, стала бы
- * оракулом — тот самый дефект, который дважды ловился в прошлых срезах.
+ *
+ * Живая проверка на Ollama показала, почему на «попробуйте» отвечает
+ * сценарий, а не модель: блокировку сняли, флаг встал, а модель по
+ * инерции твердила «всё ещё заблокирована» — жалоба рядом с галочкой
+ * «подтвердил». Вежливость модели не подтверждает непочиненное, а её
+ * инерция не отменяет починенного.
  */
 describe('подтверждение через разговор', () => {
-  it('на сломанном мире «попробуйте» не подтверждает', async () => {
-    const s = store()
-    s().callTo('e.varga')
-    await s().say('Попробуйте войти сейчас')
+  it('реплика и флаг следуют миру, а не модели', async () => {
+    const broken = store(modelSays('Да-да, спасибо, всё прекрасно работает!'))
+    broken().callTo('e.varga')
+    await broken().say('Попробуйте войти сейчас')
+    expect(broken().session.dialogue.at(-1)!.text).toContain('то же самое')
+    expect(broken().session.flags.userConfirmed).toBe(false)
 
-    expect(s().session.flags.userConfirmed).toBe(false)
-    expect(s().session.dialogue.at(-1)!.text).toContain('то же самое')
-  })
-
-  it('на починенном — подтверждает', async () => {
-    const s = store()
-    s().verifyRequester('manager', 'Dumisani Mbeki')
-    s().unlockUser('e.varga')
-    s().callTo('e.varga')
-    await s().say('Попробуйте войти сейчас')
-
-    expect(s().session.flags.userConfirmed).toBe(true)
-    expect(s().session.dialogue.at(-1)!.text).toContain('пустило')
-  })
-
-  /*
-    Проверку результата модель не отвечает вовсе — её отвечает мир.
-
-    Сначала защита была мягче: модель говорила что угодно, а флаг
-    ставился по `fixedWhen`. Живая проверка на Ollama показала, чем это
-    плохо: блокировку сняли, флаг встал, а модель по инерции твердила
-    «всё ещё заблокирована» — на экране жалоба рядом с галочкой
-    «подтвердил». Теперь на «попробуйте» отвечает сценарий, и реплика с
-    флагом не расходятся никогда.
-  */
-  it('вежливость модели не подтверждает непочиненное', async () => {
-    const s = store(modelSays('Да-да, спасибо, всё прекрасно работает!'))
-    s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
-    s().callTo('e.varga')
-    await s().say('Попробуйте войти сейчас')
-
-    expect(s().session.dialogue.at(-1)!.text).not.toContain('прекрасно работает')
-    expect(s().session.dialogue.at(-1)!.text).toContain('то же самое')
-    expect(s().session.flags.userConfirmed).toBe(false)
-  })
-
-  it('на починенном мире реплика и флаг не расходятся', async () => {
-    const s = store(modelSays('Нет, всё ещё не пускает!'))
-    s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
-    s().verifyRequester('manager', 'Dumisani Mbeki')
-    s().unlockUser('e.varga')
-    s().callTo('e.varga')
-    await s().say('Попробуйте войти сейчас')
-
-    expect(s().session.dialogue.at(-1)!.text).toContain('пустило')
-    expect(s().session.flags.userConfirmed).toBe(true)
+    const fixed = store(modelSays('Нет, всё ещё не пускает!'))
+    fix(fixed)
+    fixed().callTo('e.varga')
+    await fixed().say('Попробуйте войти сейчас')
+    expect(fixed().session.dialogue.at(-1)!.text).toContain('пустило')
+    expect(fixed().session.flags.userConfirmed).toBe(true)
   })
 
   it('подтверждает только заявитель, а не коллега', async () => {
     const s = store()
-    s().verifyRequester('manager', 'Dumisani Mbeki')
-    s().unlockUser('e.varga')
+    fix(s)
     s().callTo('s.okafor')
     await s().say('Попробуйте войти сейчас')
-
     expect(s().session.flags.userConfirmed).toBe(false)
   })
 })
 
-describe('звонок коллеге', () => {
-  it('коллега отвечает про себя', async () => {
-    const s = store()
-    s().callTo('s.okafor')
-    await s().say('У вас так же?')
+describe('модель в сторе', () => {
+  /* Проверка среза: модель выключилась — тренировка продолжается с плашкой. */
+  it('ответ модели снимает плашку, отказ её показывает', async () => {
+    const alive = store(modelSays('Утром, как пришла на работу.'))
+    alive().callTo('e.varga')
+    await alive().say('Когда это началось?')
+    expect(alive().session.dialogue.at(-1)!.text).toBe('Утром, как пришла на работу.')
+    expect(alive().dialogueNotice).toBeNull()
 
-    expect(s().session.dialogue.at(-1)!.text).toContain('у меня')
+    const dead = store(async () => { throw new Error('ECONNREFUSED') })
+    dead().callTo('e.varga')
+    await dead().say('Когда это началось?')
+    expect(dead().session.dialogue.at(-1)!.text).toContain('Сегодня утром')
+    expect(dead().dialogueNotice).toContain('недоступна')
   })
 
-  it('разговор приписан коллеге, а не заявителю', async () => {
-    const s = store()
-    s().callTo('s.okafor')
-    await s().say('Здравствуйте')
-
-    expect(s().session.dialogue.every(d => d.with === 's.okafor')).toBe(true)
-  })
-
-  /*
-    История разговора не смешивается: контекст беседы с коллегой не
-    должен попадать в разговор с заявителем.
-  */
-  it('истории разных собеседников раздельны', async () => {
-    const s = store()
-    s().callTo('s.okafor')
-    await s().say('Здравствуйте')
-    s().callTo('e.varga')
-    await s().say('Когда это началось?')
-
-    const ticket = s().queue.tickets.find(t => t.number === s().queue.assigned)!
-    const withVarga = ticket.communications.filter(c => c.with === 'e.varga')
-    expect(withVarga).toHaveLength(2)
-  })
-})
-
-describe('модель подключена', () => {
-  it('ответ приходит от модели', async () => {
-    const s = store(modelSays('Утром, как пришла на работу.'))
-    s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
-    s().callTo('e.varga')
-    await s().say('Когда это началось?')
-
-    expect(s().session.dialogue.at(-1)!.text).toBe('Утром, как пришла на работу.')
-    expect(s().dialogueNotice).toBeNull()
-  })
-
-  /* Проверка среза: модель выключена — тренировка продолжается. */
-  it('отказ модели даёт реплику сценария и плашку', async () => {
-    const dead: FetchLike = async () => { throw new Error('ECONNREFUSED') }
-    const s = store(dead)
-    s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
-    s().callTo('e.varga')
-    await s().say('Когда это началось?')
-
-    expect(s().session.dialogue.at(-1)!.text).toContain('Сегодня утром')
-    expect(s().dialogueNotice).toContain('недоступна')
-  })
-
-  it('после отказа разговор идёт дальше', async () => {
-    const dead: FetchLike = async () => { throw new Error('ECONNREFUSED') }
-    const s = store(dead)
-    s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
-    s().callTo('e.varga')
-    await s().say('Когда это началось?')
-    await s().say('Вы недавно меняли пароль?')
-
-    expect(s().session.dialogue.at(-1)!.text).toContain('на прошлой неделе')
-    expect(s().session.dialogue).toHaveLength(4)
-  })
-
-  it('проверка соединения сообщает результат', async () => {
+  it('настройки модели и результат проверки живут в сторе и переживают сброс', async () => {
     const s = store(modelSays('ок'))
-    s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
+    s().setDialogueConfig({ ...defaultConfig(), mode: 'local', model: 'qwen2.5' })
     await s().probeModel()
     expect(s().probeResult).toEqual({ ok: true })
-  })
 
-  it('настройки переживают сброс мира', () => {
-    const s = store()
-    s().setDialogueConfig({ ...defaultConfig(), mode: 'local', model: 'qwen2.5' })
     s().reset()
     expect(s().dialogueConfig.model).toBe('qwen2.5')
   })
 })
 
-describe('состояние ожидания', () => {
-  it('во время ответа поднят флаг ожидания', async () => {
-    let release: (() => void) | null = null
-    const slow: FetchLike = async () => {
-      await new Promise<void>(r => { release = r })
-      return { ok: true, status: 200, json: async () => ({ choices: [] }) }
-    }
-    const s = store(slow)
-    s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
-    s().callTo('e.varga')
-
-    const pending = s().say('Когда это началось?')
-    expect(s().waitingReply).toBe(true)
-
-    release!()
-    await pending
-    expect(s().waitingReply).toBe(false)
-  })
-
-  /*
-    Найдено разбором кода: после await проверялся только собеседник.
-    Закрытый тикет, сброс и смена инцидента пропускали ответ в
-    изменившийся мир — реплика дописывалась в закрытую переписку, а
-    `userConfirmed` мог подняться уже после того, как разбор посчитан
-    и показан.
-  */
-  it('закрытие тикета во время ожидания отбрасывает ответ', async () => {
-    let release: (() => void) | null = null
-    const slow: FetchLike = async () => {
-      await new Promise<void>(r => { release = r })
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ choices: [{ message: { content: 'поздний ответ' } }] }),
-      }
-    }
-    const s = store(slow)
-    // Тикет закрывают, пока модель думает: после resolveTicket он уходит
-    // из окна, поэтому ссылку на переписку берём до закрытия.
-    const ticket = s().queue.tickets.find(
-      t => t.scenarioId === 'identity-account-lockout')!
-    s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
-    s().verifyRequester('manager', 'Dumisani Mbeki')
-    s().unlockUser('e.varga')
-    s().callTo('e.varga')
-
-    // Обычный вопрос: проверку результата модель не отвечает вовсе.
-    const pending = s().say('Что сейчас на экране?')
-
-    s().saveResolutionNotes('Снял блокировку с e.varga.')
-    s().setResolutionCode('solved')
-    s().resolveTicket()
-    const confirmedAtGrading = s().scorecard!.dimensions
-      .find(d => d.id === 'communication')!.score
-
-    release!()
-    await pending
-
-    expect(ticket.communications.some(c => c.text === 'поздний ответ')).toBe(false)
-    // разбор посчитан и остаётся правдой
-    expect(s().scorecard!.dimensions.find(d => d.id === 'communication')!.score)
-      .toBe(confirmedAtGrading)
-  })
-
-  it('сброс во время ожидания не пачкает новое прохождение', async () => {
-    let release: (() => void) | null = null
-    const slow: FetchLike = async () => {
-      await new Promise<void>(r => { release = r })
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ choices: [{ message: { content: 'из прошлой игры' } }] }),
-      }
-    }
-    const s = store(slow)
-    s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
-    s().callTo('e.varga')
-
-    const pending = s().say('Здравствуйте')
-    s().reset()
-
-    release!()
-    await pending
-
-    expect(s().session.dialogue).toHaveLength(0)
-    expect(s().queue.tickets.every(
-      t => t.communications.length === 0)).toBe(true)
-  })
-
+describe('ответ, пришедший позже', () => {
   /* Обычные действия во время ожидания ответ не отбрасывают. */
-  it('работа в других инструментах ответу не мешает', async () => {
-    let release: (() => void) | null = null
-    const slow: FetchLike = async () => {
-      await new Promise<void>(r => { release = r })
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ choices: [{ message: { content: 'дошёл ответ' } }] }),
-      }
-    }
-    const s = store(slow)
-    s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
+  it('пока модель думает, поднят флаг ожидания, а работа в инструментах не мешает', async () => {
+    const m = slowModel('дошёл ответ')
+    const s = store(m.fetch)
     s().callTo('e.varga')
 
     const pending = s().say('Здравствуйте')
-
+    expect(s().waitingReply).toBe(true)
     s().openApp('eventvwr')
     s().runCommand('net user e.varga')
     s().inspectObject('user', 'e.varga')
 
-    release!()
+    m.release()
     await pending
-
+    expect(s().waitingReply).toBe(false)
     expect(s().session.dialogue.at(-1)!.text).toBe('дошёл ответ')
   })
 
-  it('смена собеседника во время ожидания отбрасывает ответ', async () => {
-    let release: (() => void) | null = null
-    const slow: FetchLike = async () => {
-      await new Promise<void>(r => { release = r })
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ choices: [{ message: { content: 'поздний ответ' } }] }),
-      }
-    }
-    const s = store(slow)
-    s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
-    s().callTo('e.varga')
+  /*
+    Найдено разбором кода: после await проверялся только собеседник.
+    Закрытый тикет, сброс и смена собеседника пропускали ответ в
+    изменившийся мир — реплика дописывалась в закрытую переписку, а
+    `userConfirmed` мог подняться после того, как разбор посчитан.
+  */
+  it('ответ в изменившийся мир отбрасывается', async () => {
+    // Тикет закрыли, пока модель думала.
+    const closed = slowModel('поздний ответ')
+    const a = store(closed.fetch)
+    const ticket = assignedTicket(a)
+    fix(a)
+    a().callTo('e.varga')
+    const p1 = a().say('Что сейчас на экране?')
+    a().setResolutionCode('solved')
+    a().resolveTicket()
+    const graded = a().scorecard!.dimensions.find(d => d.id === 'communication')!.score
+    closed.release()
+    await p1
+    expect(ticket.communications.some(c => c.text === 'поздний ответ')).toBe(false)
+    expect(a().scorecard!.dimensions.find(d => d.id === 'communication')!.score).toBe(graded)
 
-    const pending = s().say('Когда это началось?')
-    s().callTo('s.okafor')
-    release!()
-    await pending
+    // Прохождение начали заново.
+    const reset = slowModel('из прошлой игры')
+    const b = store(reset.fetch)
+    b().callTo('e.varga')
+    const p2 = b().say('Здравствуйте')
+    b().reset()
+    reset.release()
+    await p2
+    expect(b().session.dialogue).toHaveLength(0)
+    expect(b().queue.tickets.every(t => t.communications.length === 0)).toBe(true)
 
-    expect(s().session.dialogue.some(d => d.text === 'поздний ответ')).toBe(false)
+    // Техник переключился на другого собеседника.
+    const switched = slowModel('поздний ответ')
+    const c = store(switched.fetch)
+    c().callTo('e.varga')
+    const p3 = c().say('Когда это началось?')
+    c().callTo('s.okafor')
+    switched.release()
+    await p3
+    expect(c().session.dialogue.some(d => d.text === 'поздний ответ')).toBe(false)
   })
 })

@@ -57,30 +57,70 @@ function perfectRun(): GradeArgs {
   return { world, ticket, session, scenario: apipaNoLease }
 }
 
-describe('gradeIncident — образцовое прохождение', () => {
-  it('даёт полный вердикт', () => {
+const dim = (card: ReturnType<typeof gradeIncident>, id: string) =>
+  card.dimensions.find(d => d.id === id)!
+
+describe('оценка инцидента', () => {
+  it('образцовое прохождение: полный вердикт, все цели, ни одной тихой поломки', () => {
     const r = gradeIncident(perfectRun())
     expect(r.verdict).toBe('full')
     expect(r.points).toBeGreaterThan(40)
+    expect(r.objectives.filter(o => !o.met).map(o => o.id)).toEqual([])
+    expect(r.silentFaults).toEqual([])
+    expect(r.dimensions.map(d => d.id)).toEqual([
+      'ownership', 'investigation', 'documentation', 'communication', 'authority', 'resolution',
+    ])
+    for (const d of r.dimensions) expect(d.score, d.id).toBeGreaterThanOrEqual(8)
   })
 
-  it('засчитывает все цели', () => {
-    const r = gradeIncident(perfectRun())
-    const unmet = r.objectives.filter(o => !o.met).map(o => o.id)
-    expect(unmet).toEqual([])
+  /*
+    Доктрина «подтверждает заявитель, а не техник» реально считается и в
+    ориентире: решено верно, заметка подробная — и всё равно PARTIAL.
+  */
+  it('починил, но не подтвердил у заявителя — частичный вердикт из-за коммуникации', () => {
+    const a = perfectRun()
+    setFlag(a.session, 'userConfirmed', false)
+    a.session.dialogue = []
+    a.ticket.resolutionNotes = 'Сделал release и renew, адрес стал 10.20.14.88.'
+    const r = gradeIncident(a)
+
+    expect(r.verdict).toBe('partial')
+    expect(dim(r, 'communication').score).toBeLessThan(8)
+    expect(dim(r, 'communication').explain).toContain('экран')
+    expect(r.objectives.find(o => o.id === 'obj-confirm')!.met).toBe(false)
   })
 
-  it('не находит тихих поломок', () => {
-    expect(gradeIncident(perfectRun()).silentFaults).toEqual([])
+  it('опасное действие обнуляет полномочия и валит вердикт при верном решении', () => {
+    const a = perfectRun()
+    addDangerousAction(a.session, clock,
+      'netsh advfirewall set allprofiles state off', 'отключение защиты')
+    const r = gradeIncident(a)
+    expect(dim(r, 'authority').score).toBe(0)
+    expect(r.verdict).toBe('fail')
   })
 
-  it('все шесть измерений высоко оценены', () => {
-    const r = gradeIncident(perfectRun())
-    expect(r.dimensions).toHaveLength(6)
-    for (const d of r.dimensions) {
-      expect(d.score, `измерение ${d.id}`).toBeGreaterThanOrEqual(8)
-      expect(d.explain.length).toBeGreaterThan(15)
-    }
+  /* Самая недобрая часть оценки: всё работает, заявитель доволен — а мина заложена. */
+  it('тихая поломка валит вердикт: DHCP выключен вручную, адрес всё ещё самоназначен', () => {
+    const manual = perfectRun()
+    manual.world.devices['AL-LPT-0447']!.adapters[0]!.dhcpEnabled = false
+    const r = gradeIncident(manual)
+    expect(r.silentFaults).toEqual([expect.stringContaining('вручную')])
+    expect(r.verdict).toBe('fail')
+    expect(dim(r, 'resolution').score).toBe(2)
+
+    const stuck = perfectRun()
+    stuck.world.devices['AL-LPT-0447']!.adapters[0]!.autoconfigured = true
+    expect(gradeIncident(stuck).silentFaults).toEqual([expect.stringContaining('самоназначенный')])
+  })
+
+  it('неверный код снижает полномочия, работа до взятия тикета — владение', () => {
+    const wrongCode = perfectRun()
+    wrongCode.ticket.resolutionCode = 'escalate'
+    expect(dim(gradeIncident(wrongCode), 'authority').score).toBe(5)
+
+    const unclaimed = perfectRun()
+    unclaimed.ticket.createdAt = null
+    expect(dim(gradeIncident(unclaimed), 'ownership').score).toBe(4)
   })
 })
 
@@ -90,132 +130,25 @@ describe('gradeIncident — образцовое прохождение', () => 
   тут же ставил 10 из 10 — измерение противоречило собственному
   объяснению, а масштаб маскировал недоделанное расследование.
 */
-describe('надбавка за масштаб не маскирует незакрытые цели', () => {
-  const scenario = identityShareAccess
-
+describe('надбавка за масштаб', () => {
   const run = (opts: { scope: boolean; investigate: boolean }) => {
-    const { world, ticket } = loadScenario(scenario)
+    const { world, ticket } = loadScenario(identityShareAccess)
     const session = createSession()
-    const clock = { now: () => new Date('2026-09-12T10:00:00.000Z') }
-
     if (opts.scope) setFlag(session, 'scopeChecked', true)
     if (opts.investigate) {
       recordCommand(session, clock, ticket.device, 'net user n.haruna', 0)
-      recordCommand(session, clock, ticket.device,
-        'dsquery group -name GRP-Finance*', 0)
+      recordCommand(session, clock, ticket.device, 'dsquery group -name GRP-Finance*', 0)
     }
-
     ticket.status = 'completed'
-    return gradeIncident({ world, ticket, session, scenario })
+    return dim(gradeIncident({ world, ticket, session, scenario: identityShareAccess }),
+      'investigation')
   }
 
-  it('неполное расследование не получает максимум даже с масштабом', () => {
-    const card = run({ scope: true, investigate: false })
-    const inv = card.dimensions.find(d => d.id === 'investigation')!
-    expect(inv.score).toBeLessThan(10)
-  })
-
-  it('масштаб всё же добавляет балл к неполному расследованию', () => {
+  it('добавляет балл, но не дотягивает неполное расследование до десятки', () => {
     const withScope = run({ scope: true, investigate: false })
-    const without = run({ scope: false, investigate: false })
-
-    const score = (c: typeof withScope) =>
-      c.dimensions.find(d => d.id === 'investigation')!.score
-
-    expect(score(withScope)).toBeGreaterThan(score(without))
-  })
-
-  it('полное расследование даёт максимум и без масштаба', () => {
-    const card = run({ scope: false, investigate: true })
-    expect(card.dimensions.find(d => d.id === 'investigation')!.score).toBe(10)
-  })
-
-  it('объяснение не противоречит баллу', () => {
-    const card = run({ scope: true, investigate: false })
-    const inv = card.dimensions.find(d => d.id === 'investigation')!
-    expect(inv.explain).toContain('Закрыто 0 из 2')
-    expect(inv.score).toBeLessThan(10)
-  })
-})
-
-describe('gradeIncident — починил, но не подтвердил у заявителя', () => {
-  function run(): GradeArgs {
-    const a = perfectRun()
-    setFlag(a.session, 'userConfirmed', false)
-    a.session.dialogue = []
-    a.ticket.resolutionNotes = 'Сделал release и renew, адрес стал 10.20.14.88.'
-    return a
-  }
-
-  it('даёт частичный вердикт, а не полный', () => {
-    expect(gradeIncident(run()).verdict).toBe('partial')
-  })
-
-  it('проседает именно коммуникация', () => {
-    const r = gradeIncident(run())
-    expect(r.dimensions.find(d => d.id === 'communication')!.score).toBeLessThan(8)
-  })
-
-  it('объясняет, что подтверждение со своего экрана не считается', () => {
-    const r = gradeIncident(run())
-    expect(r.dimensions.find(d => d.id === 'communication')!.explain)
-      .toContain('экран')
-  })
-
-  it('цель подтверждения не засчитана', () => {
-    const r = gradeIncident(run())
-    expect(r.objectives.find(o => o.id === 'obj-confirm')!.met).toBe(false)
-  })
-})
-
-describe('gradeIncident — опасное действие', () => {
-  function run(): GradeArgs {
-    const a = perfectRun()
-    addDangerousAction(a.session, clock,
-      'netsh advfirewall set allprofiles state off', 'отключение защиты')
-    return a
-  }
-
-  it('обнуляет измерение полномочий', () => {
-    expect(gradeIncident(run()).dimensions.find(d => d.id === 'authority')!.score).toBe(0)
-  })
-
-  it('валит вердикт целиком, несмотря на верное решение', () => {
-    expect(gradeIncident(run()).verdict).toBe('fail')
-  })
-})
-
-describe('gradeIncident — тихая поломка', () => {
-  it('отключённый DHCP вместо аренды фиксируется', () => {
-    const a = perfectRun()
-    a.world.devices['AL-LPT-0447']!.adapters[0]!.dhcpEnabled = false
-    const r = gradeIncident(a)
-    expect(r.silentFaults.length).toBeGreaterThan(0)
-    expect(r.silentFaults[0]).toContain('вручную')
-    expect(r.verdict).toBe('fail')
-  })
-
-  it('оставленный самоназначенный адрес тоже тихая поломка', () => {
-    const a = perfectRun()
-    a.world.devices['AL-LPT-0447']!.adapters[0]!.autoconfigured = true
-    expect(gradeIncident(a).silentFaults.length).toBeGreaterThan(0)
-  })
-})
-
-describe('gradeIncident — неверный код закрытия', () => {
-  it('снижает измерение полномочий', () => {
-    const a = perfectRun()
-    a.ticket.resolutionCode = 'escalate'
-    const r = gradeIncident(a)
-    expect(r.dimensions.find(d => d.id === 'authority')!.score).toBeLessThan(10)
-  })
-})
-
-describe('gradeIncident — тикет не был взят до начала работы', () => {
-  it('снижает владение', () => {
-    const a = perfectRun()
-    a.ticket.createdAt = null
-    const r = gradeIncident(a)
-    expect(r.dimensions.find(d => d.id === 'ownership')!.score).toBeLessThan(10)
+    expect(withScope.score).toBe(2)
+    expect(withScope.explain).toContain('Закрыто 0 из 2')
+    expect(run({ scope: false, investigate: false }).score).toBe(0)
+    expect(run({ scope: false, investigate: true }).score).toBe(10)
   })
 })

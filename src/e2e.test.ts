@@ -1,132 +1,380 @@
 import { describe, it, expect } from 'vitest'
 import { createGameStore } from './store/useGame'
+import { hasShareAccess } from './core/directory/accounts'
+import { defaultConfig } from './core/dialogue/types'
+import { SCENARIOS } from './scenarios'
+import type { FetchLike } from './core/dialogue/openai'
 
-const clock = { now: () => new Date('2026-09-09T18:00:00.000Z') }
+/**
+ * Сценарии от начала до конца.
+ *
+ * Здесь только то, что видно лишь целиком: образцовый проход каждого
+ * сценария и развилки, ради которых сценарий существует. Форматы,
+ * операции и флаги проверены на своих слоях.
+ */
 
-const store = () => {
-  const g = createGameStore(clock)
-  g.getState().start()
-  return () => g.getState()
+/** Стор с окном на всю библиотеку и взятым тикетом сценария. */
+const play = (scenarioId: string, iso: string, fetch?: FetchLike) => {
+  const g = createGameStore({ now: () => new Date(iso) }, fetch ? { fetch } : undefined,
+    SCENARIOS.length)
+  const s = () => g.getState()
+  s().claimTicket(s().queue.tickets.find(t => t.scenarioId === scenarioId)!.number)
+  if (fetch) s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
+  return s
 }
+type S = ReturnType<typeof play>
 
-const PERFECT_NOTE =
-  'Priya Raman сообщила, что не открываются сайты, локальные программы '
-  + 'работают. ipconfig /all показал 169.254.23.11 без шлюза и без DNS — это '
-  + 'исключило неверные настройки DNS. ipconfig /renew завершился ошибкой '
-  + 'обращения к серверу. После ipconfig /release повторный renew выдал '
-  + '10.20.14.88 со шлюзом и DNS. Проверено: ping 8.8.8.8 отвечает, '
-  + 'заявительница подтвердила по телефону, что сайты открываются. '
-  + 'Причина — кратковременная недоступность ретрансляции при загрузке.'
+const close = (s: S, note: string) => {
+  s().saveResolutionNotes(note)
+  s().setResolutionCode('solved')
+  s().resolveTicket()
+  return s().scorecard!
+}
+const unmet = (s: S) => s().scorecard!.objectives.filter(o => !o.met).map(o => o.id)
+const dim = (s: S, id: string) => s().scorecard!.dimensions.find(d => d.id === id)!
+const printed = (s: S) => s().terminalLines.map(l => l.text).join('\n')
 
-describe('APIPA-инцидент от начала до конца', () => {
-  it('образцовое прохождение даёт полный вердикт', () => {
-    const s = store()
-    s().claimTicket(s().queue.tickets[0]!.number)
+describe('APIPA', () => {
+  /*
+    Каждое измерение проверяется поимённо, а не только вердикт: full
+    переживает недобор в одном измерении. Так однажды осталась
+    незамеченной ошибка порядка в resolveTicket — оценка считалась до
+    закрытия тикета, и владение недобирало четыре балла.
+  */
+  it('образцовый проход: renew падает, release + renew чинит — десять во всех измерениях', () => {
+    const s = play('net-apipa-no-lease', '2026-09-09T18:00:00.000Z')
     s().verifyRequester('manager', 'Elena Varga')
-
     s().runCommand('ipconfig /all')
     s().runCommand('ipconfig /renew')      // падает — так и задумано
     s().runCommand('ipconfig /release')
-    s().runCommand('ipconfig /renew')      // проходит
+    s().runCommand('ipconfig /renew')
     s().runCommand('ping 8.8.8.8')
     s().runCommand('nslookup internal-portal.arcline.corp')
     s().confirmWithUser()
 
-    s().saveResolutionNotes(PERFECT_NOTE)
-    s().setResolutionCode('solved')
-    s().resolveTicket()
+    const card = close(s, 'Priya Raman сообщила, что не открываются сайты, локальные программы '
+      + 'работают. ipconfig /all показал 169.254.23.11 без шлюза и без DNS — это '
+      + 'исключило неверные настройки DNS. ipconfig /renew завершился ошибкой '
+      + 'обращения к серверу. После ipconfig /release повторный renew выдал '
+      + '10.20.14.88 со шлюзом и DNS. Проверено: ping 8.8.8.8 отвечает, '
+      + 'заявительница подтвердила по телефону, что сайты открываются. '
+      + 'Причина — кратковременная недоступность ретрансляции при загрузке.')
 
-    const card = s().scorecard!
-    expect(card).not.toBeNull()
     expect(card.verdict).toBe('full')
-    expect(card.objectives.every(o => o.met)).toBe(true)
     expect(card.silentFaults).toEqual([])
+    expect(unmet(s)).toEqual([])
     expect(card.note.score).toBe(10)
-
-    /*
-      Проверяем каждое измерение поимённо, а не только вердикт.
-
-      Вердикт full переживает недобор в одном измерении, потому что
-      порог ниже максимума — именно так однажды осталась незамеченной
-      ошибка порядка в resolveTicket: оценка считалась до закрытия
-      тикета, и владение недобирало четыре балла при безупречном
-      прохождении.
-    */
-    const low = card.dimensions.filter(d => d.score < 10).map(d => `${d.id}=${d.score}`)
-    expect(low).toEqual([])
+    expect(card.dimensions.filter(d => d.score < 10).map(d => `${d.id}=${d.score}`)).toEqual([])
     expect(card.points).toBe(54)
   })
+})
 
-  it('починил, но не перезвонил — частичный вердикт', () => {
-    const s = store()
-    s().claimTicket(s().queue.tickets[0]!.number)
+describe('диспетчер печати', () => {
+  const at = '2026-09-10T10:00:00.000Z'
+  const NOTE = 'Sam Okafor сообщил, что документы не печатаются и задания копятся в '
+    + 'очереди. sc query spooler показал, что диспетчер печати остановлен, '
+    + 'а тип запуска — «отключена». В журнале событий нашёлся сбой: драйвер '
+    + 'kiyomi_pcl6.dll трижды ронял spoolsv.exe, после чего службу отключили. '
+    + 'Вернул тип запуска «автоматически» и запустил службу. Проверено: '
+    + 'заявитель подтвердил, что лист вышел. Передаю второй линии: пока '
+    + 'драйвер Kiyomi PCL6 не заменён, падения повторятся.'
+  const restart = (s: S) => {
+    s().setServiceStartType('Spooler', 'auto')
+    s().startServiceOn('Spooler')
+  }
 
-    s().runCommand('ipconfig /all')
-    s().runCommand('ipconfig /renew')
-    s().runCommand('ipconfig /release')
-    s().runCommand('ipconfig /renew')
-
-    s().saveResolutionNotes(
-      'Не открывались сайты. ipconfig /all показал 169.254.23.11 без шлюза, '
-      + 'ipconfig /renew завершился ошибкой. После release адрес стал 10.20.14.88.')
-    s().setResolutionCode('solved')
-    s().resolveTicket()
-
-    const card = s().scorecard!
-    expect(card.verdict).toBe('partial')
-    expect(card.dimensions.find(d => d.id === 'communication')!.score).toBeLessThan(8)
-    expect(card.objectives.find(o => o.id === 'obj-confirm')!.met).toBe(false)
+  it('образцовый проход: журнал событий, тип запуска, старт, подтверждение', () => {
+    const s = play('print-spooler-stopped', at)
+    s().runCommand('sc query spooler')
+    s().openApp('eventvwr')
+    restart(s)
+    s().confirmWithUser()
+    expect(close(s, NOTE).verdict).toBe('full')
+    expect(unmet(s)).toEqual([])
   })
 
-  it('попытка отключить фаервол валит вердикт целиком', () => {
-    const s = store()
-    s().claimTicket(s().queue.tickets[0]!.number)
-    s().verifyRequester('manager', 'Elena Varga')
+  /* Терминалом этот сценарий честно не закрыть: причина видна только в журнале. */
+  it('запустил службу, не прочитав журнал, — цель не закрыта', () => {
+    const s = play('print-spooler-stopped', at)
+    restart(s)
+    s().confirmWithUser()
+    expect(close(s, NOTE).verdict).not.toBe('full')
+    expect(unmet(s)).toContain('obj-read-log')
+  })
 
-    s().runCommand('netsh advfirewall set allprofiles state off')
-    s().runCommand('ipconfig /release')
-    s().runCommand('ipconfig /renew')
-    s().runCommand('ping 8.8.8.8')
+  /* Окно «Службы» и команда sc — представления одной операции, и через стор тоже. */
+  it('остановка службы мышью и командой пишет в журнал одно и то же', () => {
+    const viaWindow = play('print-spooler-stopped', at)
+    restart(viaWindow)
+    viaWindow().stopServiceOn('Spooler')
+
+    const viaCommand = play('print-spooler-stopped', at)
+    viaCommand().runCommand('sc config spooler start= auto')
+    viaCommand().runCommand('sc start spooler')
+    viaCommand().runCommand('sc stop spooler')
+
+    expect(viaWindow().session.changes).toEqual(viaCommand().session.changes)
+    expect(viaWindow().world.devices['AL-DSK-0192']).toEqual(viaCommand().world.devices['AL-DSK-0192'])
+  })
+
+  it('вернул тип «отключена» — тихая поломка до первой перезагрузки', () => {
+    const s = play('print-spooler-stopped', at)
+    s().openApp('eventvwr')
+    restart(s)
+    s().setServiceStartType('Spooler', 'disabled')
+    s().confirmWithUser()
+    const card = close(s, NOTE)
+    expect(card.silentFaults).toEqual([expect.stringContaining('перезагрузк')])
+    expect(card.verdict).toBe('fail')
+  })
+})
+
+describe('блокировка учётной записи', () => {
+  const at = '2026-09-10T08:30:00.000Z'
+  const NOTE = 'Elena Varga сообщила, что не может войти — система пишет, что учётная '
+    + 'запись заблокирована. net user e.varga показал блокировку и девять '
+    + 'неудачных входов. В журнале событий нашлось событие 4740: источник '
+    + 'блокировки — устройство ARC-MOBILE-0512, рабочий телефон, и подряд '
+    + 'идущие 4771 с одного адреса. Пароль верный, поэтому не сбрасывал: снял '
+    + 'блокировку с e.varga и попросил удалить и заново добавить почту ArcMail '
+    + 'на телефоне. Проверено: заявительница подтвердила, что вход прошёл. '
+    + 'При повторении смотреть телефон — причина в кэше пароля.'
+  const investigate = (s: S) => {
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    s().runCommand('net user e.varga')
+    s().openApp('eventvwr')
+  }
+
+  it('образцовый проход: журнал, разблокировка, просьба про телефон', () => {
+    const s = play('identity-account-lockout', at)
+    investigate(s)
+    s().unlockUser('e.varga')
+    s().askRequesterTo('clear-phone')
+    s().confirmWithUser()
+    expect(close(s, NOTE).verdict).toBe('full')
+    expect(unmet(s)).toEqual([])
+  })
+
+  /*
+    Самая поучительная развилка: блокировку сняли, заявитель доволен, а
+    телефон продолжает ломиться, и учётка заблокируется снова до обеда.
+  */
+  it('разблокировал, но не сказал про телефон, — тихая поломка', () => {
+    const s = play('identity-account-lockout', at)
+    investigate(s)
+    s().unlockUser('e.varga')
+    s().confirmWithUser()
+    const card = close(s, NOTE)
+    expect(card.silentFaults).toEqual([expect.stringContaining('заблокируется снова')])
+    expect(card.verdict).toBe('fail')
+  })
+
+  /*
+    Не открыв журнал, техник не узнаёт про телефон и попросить о нём не
+    может: просьба закрыта до выяснения причины.
+  */
+  it('разблокировал, не открыв журнал, — просьба закрыта, источник остался', () => {
+    const s = play('identity-account-lockout', at)
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    s().unlockUser('e.varga')
+    s().askRequesterTo('clear-phone')
+    s().confirmWithUser()
+    const card = close(s, 'Снял блокировку с e.varga, пользователь вошёл.')
+    expect(unmet(s)).toEqual(expect.arrayContaining(['obj-find-source', 'obj-ask-phone']))
+    expect(card.silentFaults).toHaveLength(1)
+    expect(card.verdict).toBe('fail')
+  })
+
+  /* Ловушка сценария: сбросить пароль вместо разблокировки, да ещё без сверки. */
+  it('сброс пароля без сверки личности валит вердикт', () => {
+    const s = play('identity-account-lockout', at)
+    s().resetUserPassword('e.varga')
+    s().unlockUser('e.varga')
+    s().openApp('eventvwr')
+    s().askRequesterTo('clear-phone')
+    s().confirmWithUser()
+    expect(close(s, NOTE).verdict).toBe('fail')
+    expect(dim(s, 'authority').score).toBe(0)
+  })
+
+  const CONSOLE_NOTE = 'Elena Varga сообщила, что не может войти — пишет, что учётная запись '
+    + 'заблокирована. Смотрел карточку в консоли каталога: блокировка и девять '
+    + 'неудачных входов, последний вход вчера вечером. В журнале событий событие '
+    + '4740: источник — ARC-MOBILE-0512, рабочий телефон. Пароль верный, поэтому '
+    + 'не сбрасывал: снял блокировку с e.varga и попросил удалить и заново '
+    + 'добавить почту на телефоне. Проверено: заявительница подтвердила, что '
+    + 'вход прошёл. При повторении смотреть телефон — причина в кэше пароля.'
+
+  const byConversation = async (s: S) => {
+    s().callTo('e.varga')
+    await s().say('Здравствуйте, это служба поддержки, разбираюсь с вашей заявкой.')
+    await s().say('У коллег рядом так же?')
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    s().inspectObject('user', 'e.varga')
+    s().openApp('eventvwr')
+    s().unlockUser('e.varga')
+    s().askRequesterTo('clear-phone')
+    await s().say('Попробуйте войти сейчас, пожалуйста.')
+  }
+
+  /*
+    Пройдено в браузере руками: расследование мышью, разговор вместо
+    кнопки «Позвонить», подтверждение через «попробуйте войти». Терминал
+    не понадобился ни разу.
+  */
+  it('проход разговором и мышью — без единой команды в терминале', async () => {
+    const s = play('identity-account-lockout', at)
+    const ticket = s().queue.tickets.find(t => t.number === s().queue.assigned)!
+    await byConversation(s)
+
+    expect(s().session.flags).toMatchObject({ announcedBeforeActing: true, userConfirmed: true })
+    expect(s().session.dialogue.at(-1)!.text).toContain('пустило')
+
+    const card = close(s, CONSOLE_NOTE)
+    expect(s().session.commands).toHaveLength(0)
+    expect(card.verdict).toBe('full')
+    expect(unmet(s)).toEqual([])
+    expect(dim(s, 'investigation')).toMatchObject({
+      score: 10, explain: expect.stringContaining('Масштаб выяснен'),
+    })
+    expect(ticket.communications.length).toBeGreaterThanOrEqual(8)
+    expect(ticket.communications.every(c => c.with === 'e.varga')).toBe(true)
+  })
+
+  /**
+   * Проверка среза 4 дословно: «выдернуть сеть и выключить модель —
+   * тренировка должна продолжаться без единой ошибки». Размыкатель не
+   * даёт каждой реплике ждать таймаут.
+   */
+  it('модель выключена — проход тот же, с плашкой и одним обращением к модели', async () => {
+    let calls = 0
+    const dead: FetchLike = async () => { calls++; throw new TypeError('Failed to fetch') }
+    const s = play('identity-account-lockout', at, dead)
+
+    await byConversation(s)
+    expect(s().dialogueNotice).toContain('недоступна')
+    expect(s().session.dialogue.filter(d => d.speaker === 'requester')
+      .every(d => d.text.length > 10)).toBe(true)
+    expect(calls).toBe(1)
+    expect(close(s, CONSOLE_NOTE).verdict).toBe('full')
+  })
+})
+
+describe('доступ к папке отдела', () => {
+  const at = '2026-09-11T10:15:00.000Z'
+  const SHARE = '\\\\fileserver.arcline.corp\\Finance-Reports'
+  const GROUP = 'GRP-Finance-Reports'
+  const NOTE = 'Nadia Haruna сообщила, что папка с отчётностью не открывается — пишет, '
+    + 'что нет разрешений, при этом у коллег по отделу открывается. '
+    + 'net user n.haruna показал, что она состоит только в GRP-All-Staff и '
+    + 'GRP-Printer-Floor3. dsquery group -name GRP-Finance* нашёл группу '
+    + 'GRP-Finance-Reports, которая и даёт доступ к Finance-Reports — её в '
+    + 'списке не было. Добавил n.haruna в GRP-Finance-Reports и попросил выйти '
+    + 'и войти заново, потому что членство попадает в билет при входе. '
+    + 'Проверено: заявительница подтвердила, что папка открылась. Причина — '
+    + 'незавершённое оформление: при приёме в отдел в группу не добавили.'
+  const finish = (s: S) => {
+    s().addUserToGroup('n.haruna', GROUP)
+    s().askRequesterTo('relogin')
+    s().confirmWithUser()
+    return close(s, NOTE)
+  }
+
+  it('образцовый проход: членство, группа доступа, добавление, повторный вход', () => {
+    const s = play('identity-share-access', at)
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    s().runCommand('net user n.haruna')
+    s().runCommand('dsquery group -name GRP-Finance*')
+    expect(finish(s).verdict).toBe('full')
+    expect(unmet(s)).toEqual([])
+  })
+
+  /*
+    Ловушка сценария: доступ выдан лично, минуя группу. Папка
+    открывается сразу — потому обход и соблазнителен, — а в правах
+    осталась запись на человека.
+  */
+  it('доступ мимо группы работает сразу — и это тихая поломка', () => {
+    const s = play('identity-share-access', at)
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    s().runCommand('net user n.haruna')
+    s().grantShareAccess('n.haruna', SHARE)
+    expect(hasShareAccess(s().world, 'n.haruna', SHARE)).toBe(true)
     s().confirmWithUser()
 
-    s().saveResolutionNotes(PERFECT_NOTE)
-    s().setResolutionCode('solved')
-    s().resolveTicket()
-
-    const card = s().scorecard!
+    const card = close(s, NOTE)
+    expect(card.silentFaults).toEqual([expect.stringContaining('минуя группу')])
     expect(card.verdict).toBe('fail')
-    expect(card.dimensions.find(d => d.id === 'authority')!.score).toBe(0)
   })
 
-  it('заявитель не подтверждает, пока машина не починена', () => {
-    const s = store()
-    s().claimTicket(s().queue.tickets[0]!.number)
+  /*
+    Вторая половина сценария: членство действует только после повторного
+    входа. Расхождение каталога и билета — главный диагностический
+    признак: `net user` уже показывает группу, `whoami /groups` — ещё нет.
+    А повторный вход без группы перевыпускает тот же билет.
+  */
+  it('без повторного входа заявительница не подтверждает, и каталог расходится с билетом', () => {
+    const s = play('identity-share-access', at)
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    s().askRequesterTo('relogin')
     s().confirmWithUser()
     expect(s().session.flags.userConfirmed).toBe(false)
 
-    s().runCommand('ipconfig /release')
-    s().runCommand('ipconfig /renew')
+    s().addUserToGroup('n.haruna', GROUP)
     s().confirmWithUser()
+    s().runCommand('net user n.haruna')
+    s().runCommand('whoami /groups')
+    expect(s().session.flags.userConfirmed).toBe(false)
+    expect(printed(s)).toContain(`*${GROUP}`)
+    expect(printed(s)).not.toContain(`ARCLINE\\${GROUP}`)
+
+    s().askRequesterTo('relogin')
+    s().runCommand('whoami /groups')
+    s().confirmWithUser()
+    expect(printed(s)).toContain(`ARCLINE\\${GROUP}`)
     expect(s().session.flags.userConfirmed).toBe(true)
   })
 
-  it('связность: починка в терминале видна во всех инструментах', () => {
-    const s = store()
-    s().claimTicket(s().queue.tickets[0]!.number)
+  /*
+    Найдено визуальной проверкой: инцидент пройден правильно — членство
+    смотрел в консоли, как предлагает сам сценарий, — а разбор выдал
+    «закрыто 0 из 2 диагностических целей». Карточка другого человека
+    при этом цель не закрывает, а без расследования цели открыты.
+  */
+  it('расследование мышью закрывает те же цели, что командами', () => {
+    const viaConsole = play('identity-share-access', at)
+    viaConsole().verifyRequester('manager', 'Dumisani Mbeki')
+    viaConsole().inspectObject('user', 'n.haruna')
+    viaConsole().inspectObject('user', 'n.haruna')
+    viaConsole().inspectObject('group', GROUP)
+    expect(viaConsole().session.inspected).toEqual(['user:n.haruna', 'group:grp-finance-reports'])
+    expect(finish(viaConsole).verdict).toBe('full')
+    expect(dim(viaConsole, 'investigation').score).toBe(10)
 
-    // до починки
-    s().runCommand('ping 8.8.8.8')
-    expect(s().terminalLines.some(l => l.text.includes('Request timed out.'))).toBe(true)
-    expect(s().world.devices['AL-LPT-0447']!.adapters[0]!.gateway).toBe('')
+    const wrongCard = play('identity-share-access', at)
+    wrongCard().verifyRequester('manager', 'Dumisani Mbeki')
+    wrongCard().inspectObject('user', 's.okafor')
+    finish(wrongCard)
+    expect(unmet(wrongCard)).toEqual(expect.arrayContaining(['obj-see-membership', 'obj-find-group']))
+  })
 
-    s().runCommand('ipconfig /release')
-    s().runCommand('ipconfig /renew')
+  /**
+   * «Выйти и войти заново» — обычная просьба первой линии, и попросить
+   * о ней до того, как найдена причина, естественно. Заявительница
+   * честно скажет, что не помогло; но просьба обязана остаться
+   * доступной, иначе единственный путь к решению закрыт первой же
+   * разумной попыткой.
+   */
+  it('ранняя просьба войти заново не закрывает дорогу к полному вердикту', () => {
+    const s = play('identity-share-access', at)
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    s().askRequesterTo('relogin')
+    expect(s().session.dialogue.at(-1)!.text).toContain('всё то же самое')
 
-    // после починки — те же инструменты отвечают иначе
-    s().runCommand('ping 8.8.8.8')
-    s().runCommand('nslookup internal-portal.arcline.corp')
-    expect(s().terminalLines.some(l => l.text.includes('Reply from 8.8.8.8'))).toBe(true)
-    expect(s().terminalLines.some(l => l.text.includes('10.20.14.50'))).toBe(true)
-    expect(s().world.devices['AL-LPT-0447']!.adapters[0]!.gateway).toBe('10.20.14.1')
+    s().runCommand('net user n.haruna')
+    s().runCommand('dsquery group -name GRP-Finance*')
+    const card = finish(s)
+    expect(s().session.askedFor).toEqual(['relogin'])
+    expect(card.verdict).toBe('full')
   })
 })

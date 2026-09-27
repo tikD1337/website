@@ -56,25 +56,21 @@ async function settles(): Promise<unknown> {
 }
 
 describe('чтение испорченного хранилища', () => {
-  const cases: Array<[string, unknown]> = [
-    ['версия есть, записей нет', { version: 1 }],
-    ['записи не массив', { version: 1, records: 'нет' }],
-    ['запись — null', { version: 1, records: [null] }],
-    ['чужая версия', { version: 99, records: [] }],
-    ['вместо объекта строка', 'мусор'],
-  ]
-
-  for (const [name, stored] of cases) {
-    it(`${name} — загрузка завершается пустым прогрессом`, async () => {
+  it('любой мусор — загрузка завершается пустым прогрессом', async () => {
+    const cases: unknown[] = [
+      { version: 1 }, { version: 1, records: 'нет' }, { version: 1, records: [null] },
+      { version: 99, records: [] }, 'мусор',
+    ]
+    for (const stored of cases) {
       ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = fakeIDB(stored)
-      await expect(settles()).resolves.toEqual({ version: 1, records: [] })
-    })
-  }
+      await expect(settles(), JSON.stringify(stored)).resolves.toEqual({ version: 1, records: [] })
+    }
+  })
 
   /*
-    Последний рубеж. Даже если проверка когда-нибудь снова начнёт
-    бросать — а поводов у неё будет ровно столько же, сколько форм у
-    чужих данных, — загрузка обязана завершиться.
+    Последний рубеж. Даже если проверка когда-нибудь снова начнёт бросать —
+    а поводов у неё столько же, сколько форм у чужих данных, — загрузка
+    обязана завершиться.
   */
   it('исключение внутри колбэка не подвешивает загрузку', async () => {
     const bomb = {}
@@ -83,7 +79,6 @@ describe('чтение испорченного хранилища', () => {
       enumerable: true,
     })
     ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = fakeIDB(bomb)
-
     await expect(settles()).resolves.toEqual({ version: 1, records: [] })
   })
 })

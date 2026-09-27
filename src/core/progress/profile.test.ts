@@ -30,52 +30,31 @@ function rec(n: number, scores: Partial<Record<DimensionId, number>>): TicketRec
 }
 
 describe('профиль по шести измерениям', () => {
-  it('без истории показывать нечего', () => {
-    const p = profileFor([])
-    expect(p.sample).toBe(0)
-    expect(p.weakest).toBeNull()
-  })
+  it('среднее по каждому измерению до десятых, слабейшее — с наименьшим средним', () => {
+    expect(profileFor([])).toMatchObject({ sample: 0, weakest: null })
 
-  it('среднее считается по каждому измерению', () => {
     const p = profileFor([
-      rec(1, { communication: 4 }),
-      rec(2, { communication: 8 }),
+      rec(1, { communication: 4, investigation: 10, documentation: 3 }),
+      rec(2, { communication: 8, investigation: 9, documentation: 3 }),
+      rec(3, { communication: 6, investigation: 9, documentation: 3 }),
     ])
-    const comms = p.dimensions.find(d => d.id === 'communication')!
-    expect(comms.average).toBe(6)
-    expect(p.sample).toBe(2)
-  })
-
-  it('все шесть измерений на месте даже при одной записи', () => {
-    const p = profileFor([rec(1, {})])
+    expect(p.sample).toBe(3)
     expect(p.dimensions.map(d => d.id)).toEqual(IDS)
-  })
-
-  it('проседающее измерение — с наименьшим средним', () => {
-    const p = profileFor([rec(1, { documentation: 3, authority: 7 })])
+    expect(p.dimensions.find(d => d.id === 'communication')!.average).toBe(6)
+    expect(p.dimensions.find(d => d.id === 'investigation')!.average).toBe(9.3)
     expect(p.weakest!.id).toBe('documentation')
   })
 
   /*
-    Окно важнее полной истории: профиль отвечает на вопрос «что качать
-    сейчас», а не «каким я был в первый день». Старые провалы обязаны
-    выпадать из счёта, иначе исправленная слабость висит вечно.
+    Окно важнее полной истории: профиль отвечает «что качать сейчас», а
+    не «каким я был в первый день». Иначе исправленная слабость висит
+    вечно.
   */
   it('считаются только последние N прохождений', () => {
     const old = Array.from({ length: 10 }, (_, i) => rec(i, { resolution: 0 }))
     const recent = Array.from({ length: 10 }, (_, i) => rec(10 + i, { resolution: 10 }))
-
     const p = profileFor([...old, ...recent], 10)
     expect(p.sample).toBe(10)
     expect(p.dimensions.find(d => d.id === 'resolution')!.average).toBe(10)
-  })
-
-  it('дробное среднее округляется до десятых', () => {
-    const p = profileFor([
-      rec(1, { investigation: 10 }),
-      rec(2, { investigation: 9 }),
-      rec(3, { investigation: 9 }),
-    ])
-    expect(p.dimensions.find(d => d.id === 'investigation')!.average).toBe(9.3)
   })
 })

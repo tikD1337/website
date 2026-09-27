@@ -1,190 +1,101 @@
 import { describe, it, expect } from 'vitest'
 import { createWorld, cloneWorld } from './world'
 
-const org = () => createWorld().org
+/*
+  Инварианты стартового каталога. Сид растёт с каждым сценарием, и
+  ошибка в нём — не падение, а сценарий, который тихо ведёт себя не так:
+  несогласованное членство, руководитель-призрак, машина без хозяина.
+*/
+const unique = (xs: string[]) => new Set(xs).size === xs.length
 
-describe('дерево подразделений', () => {
-  it('непустое и содержит ожидаемые ветви', () => {
-    const paths = org().ous.map(o => o.path)
-    expect(paths).toContain('OU=Corp')
-    expect(paths).toContain('OU=Employees,OU=Corp')
-    expect(paths).toContain('OU=Tier0-Accounts,OU=Admin,OU=Corp')
-  })
+describe('стартовый каталог', () => {
+  it('подразделения: один корень, пути уникальны, родители существуют, имя = первый сегмент', () => {
+    const { ous } = createWorld().org
+    const paths = new Set(ous.map(o => o.path))
 
-  it('пути уникальны', () => {
-    const paths = org().ous.map(o => o.path)
-    expect(new Set(paths).size).toBe(paths.length)
-  })
-
-  it('каждый родитель существует', () => {
-    const o = org()
-    const paths = new Set(o.ous.map(x => x.path))
-    for (const ou of o.ous) {
-      if (ou.parent === null) continue
-      expect(paths.has(ou.parent), `родитель ${ou.parent} не найден`).toBe(true)
+    expect(unique(ous.map(o => o.path))).toBe(true)
+    expect(ous.filter(o => o.parent === null).map(o => o.path)).toEqual(['OU=Corp'])
+    for (const ou of ous) {
+      if (ou.parent !== null) expect(paths.has(ou.parent), ou.path).toBe(true)
+      expect(ou.path.startsWith(`OU=${ou.name}`), ou.path).toBe(true)
     }
   })
 
-  it('ровно один корень', () => {
-    expect(org().ous.filter(o => o.parent === null)).toHaveLength(1)
-  })
-
-  it('имя подразделения совпадает с первым сегментом пути', () => {
-    for (const ou of org().ous) {
-      expect(ou.path.startsWith(`OU=${ou.name}`), `${ou.path}`).toBe(true)
-    }
-  })
-})
-
-describe('учётные записи', () => {
-  it('логины уникальны', () => {
-    const logins = org().users.map(u => u.samAccountName)
-    expect(new Set(logins).size).toBe(logins.length)
-  })
-
-  it('каждая лежит в существующем подразделении', () => {
-    const o = org()
-    const paths = new Set(o.ous.map(x => x.path))
-    for (const u of o.users) {
-      expect(paths.has(u.ou), `${u.samAccountName} в ${u.ou}`).toBe(true)
-    }
-  })
-
-  it('на старте все включены и не заблокированы', () => {
-    for (const u of org().users) {
-      expect(u.enabled, u.samAccountName).toBe(true)
-      expect(u.lockedOut, u.samAccountName).toBe(false)
-      expect(u.lockoutSource, u.samAccountName).toBeNull()
-      expect(u.badPwdCount, u.samAccountName).toBe(0)
-    }
-  })
-
-  it('руководитель указан существующим человеком либо пуст', () => {
-    const o = org()
-    const names = new Set(o.users.map(u => u.displayName))
-    for (const u of o.users) {
-      if (u.manager === '') continue
-      expect(names.has(u.manager), `${u.samAccountName} → ${u.manager}`).toBe(true)
-    }
-  })
-
-  it('никто не назначен руководителем самому себе', () => {
-    for (const u of org().users) {
-      expect(u.manager).not.toBe(u.displayName)
-    }
-  })
-
-  it('у каждой есть основная машина', () => {
+  it('учётки: уникальны, в своих подразделениях, исправны, руководители и машины существуют', () => {
     const w = createWorld()
+    const paths = new Set(w.org.ous.map(x => x.path))
+    const names = new Set(w.org.users.map(u => u.displayName))
+
+    expect(unique(w.org.users.map(u => u.samAccountName))).toBe(true)
     for (const u of w.org.users) {
-      expect(w.devices[u.primaryDevice], u.samAccountName).toBeDefined()
-    }
-  })
-})
-
-describe('группы', () => {
-  it('имена уникальны', () => {
-    const names = org().groups.map(g => g.name)
-    expect(new Set(names).size).toBe(names.length)
-  })
-
-  it('лежат в существующих подразделениях', () => {
-    const o = org()
-    const paths = new Set(o.ous.map(x => x.path))
-    for (const g of o.groups) {
-      expect(paths.has(g.ou), `${g.name} в ${g.ou}`).toBe(true)
+      const who = u.samAccountName
+      expect(paths.has(u.ou), who).toBe(true)
+      expect([u.enabled, u.lockedOut, u.lockoutSource, u.badPwdCount], who)
+        .toEqual([true, false, null, 0])
+      if (u.manager !== '') expect(names.has(u.manager), who).toBe(true)
+      expect(u.manager, who).not.toBe(u.displayName)
+      expect(w.devices[u.primaryDevice], who).toBeDefined()
     }
   })
 
-  it('членство двусторонне согласовано', () => {
-    const o = org()
+  it('группы: уникальны, в своих подразделениях, членство согласовано с обеих сторон', () => {
+    const { ous, groups, users } = createWorld().org
+    const paths = new Set(ous.map(x => x.path))
 
-    for (const g of o.groups) {
-      for (const member of g.members) {
-        const user = o.users.find(u => u.samAccountName === member)
-        expect(user, `${g.name}: участник ${member} не найден`).toBeDefined()
-        expect(user!.groups, `${member} не знает о ${g.name}`).toContain(g.name)
+    expect(unique(groups.map(g => g.name))).toBe(true)
+    for (const g of groups) {
+      expect(paths.has(g.ou), g.name).toBe(true)
+      for (const m of g.members) {
+        expect(users.find(u => u.samAccountName === m)?.groups, `${g.name} ↔ ${m}`)
+          .toContain(g.name)
       }
     }
-
-    for (const u of o.users) {
+    for (const u of users) {
       for (const name of u.groups) {
-        const group = o.groups.find(g => g.name === name)
-        expect(group, `${u.samAccountName}: группа ${name} не найдена`).toBeDefined()
-        expect(group!.members, `${name} не знает о ${u.samAccountName}`)
+        expect(groups.find(g => g.name === name)?.members, `${u.samAccountName} ↔ ${name}`)
           .toContain(u.samAccountName)
       }
     }
   })
 
-  it('привилегированные группы помечены', () => {
-    const o = org()
-    expect(o.groups.find(g => g.name === 'Domain Admins')?.protected).toBe(true)
-    expect(o.groups.find(g => g.name === 'GRP-All-Staff')?.protected).toBe(false)
-  })
-
-  it('обычные сотрудники не состоят в привилегированных группах', () => {
-    const o = org()
-    const privileged = o.groups.filter(g => g.protected).map(g => g.name)
-    const regular = o.users.filter(u => u.ou.includes('OU=Employees'))
-    for (const u of regular) {
-      for (const g of u.groups) {
-        expect(privileged, `${u.samAccountName} состоит в ${g}`).not.toContain(g)
-      }
-    }
-  })
-})
-
-describe('общие ресурсы', () => {
-  it('каждый требует существующую группу', () => {
-    const o = org()
-    const names = new Set(o.groups.map(g => g.name))
-    for (const s of o.shares) {
-      expect(names.has(s.requiresGroup), `${s.path} → ${s.requiresGroup}`).toBe(true)
+  it('привилегированные группы помечены, и обычных сотрудников в них нет', () => {
+    const { groups, users } = createWorld().org
+    expect(groups.filter(g => g.protected).map(g => g.name))
+      .toEqual(['Domain Admins', 'GRP-Helpdesk-T1'])
+    for (const u of users.filter(x => x.ou.includes('OU=Employees'))) {
+      expect(u.groups, u.samAccountName).not.toContain('Domain Admins')
+      expect(u.groups, u.samAccountName).not.toContain('GRP-Helpdesk-T1')
     }
   })
 
-  it('группа, дающая доступ, действительно на него ссылается', () => {
-    const o = org()
-    for (const s of o.shares) {
-      const g = o.groups.find(x => x.name === s.requiresGroup)!
-      expect(g.grantsAccessTo, `${g.name} не даёт ${s.path}`).toContain(s.path)
+  it('общие ресурсы: пути уникальны, группа доступа существует и ссылается на ресурс', () => {
+    const { shares, groups } = createWorld().org
+    expect(unique(shares.map(s => s.path))).toBe(true)
+    for (const s of shares) {
+      expect(groups.find(g => g.name === s.requiresGroup)?.grantsAccessTo, s.path)
+        .toContain(s.path)
     }
   })
 
-  it('пути уникальны', () => {
-    const paths = org().shares.map(s => s.path)
-    expect(new Set(paths).size).toBe(paths.length)
+  /*
+    Пул шире числа машин: иначе renew на второй машине выдал бы адрес,
+    уже занятый первой, и получился бы конфликт из ничего.
+  */
+  it('адреса машин уникальны, а пул аренды не меньше числа машин', () => {
+    const w = createWorld()
+    const ips = Object.values(w.devices).map(d => d.adapters[0]!.ip)
+    expect(unique(ips)).toBe(true)
+    expect(w.network.segments[0]!.leasePool.length).toBeGreaterThanOrEqual(ips.length)
   })
-})
 
-describe('cloneWorld копирует каталог глубоко', () => {
-  it('правка учётной записи в копии не трогает оригинал', () => {
+  it('копия мира глубокая: правка копии не трогает оригинал', () => {
     const a = createWorld()
     const b = cloneWorld(a)
     b.org.users[0]!.lockedOut = true
-    expect(a.org.users[0]!.lockedOut).toBe(false)
-  })
-
-  it('правка членства в копии не трогает оригинал', () => {
-    const a = createWorld()
-    const before = a.org.groups[0]!.members.length
-    const b = cloneWorld(a)
     b.org.groups[0]!.members.push('кто-то')
-    expect(a.org.groups[0]!.members).toHaveLength(before)
-  })
-})
-
-describe('адресный пул шире числа машин', () => {
-  it('иначе renew на второй машине выдал бы занятый адрес', () => {
-    const w = createWorld()
-    const machines = Object.keys(w.devices).length
-    expect(w.network.segments[0]!.leasePool.length).toBeGreaterThanOrEqual(machines)
-  })
-
-  it('адреса машин уникальны', () => {
-    const w = createWorld()
-    const ips = Object.values(w.devices).map(d => d.adapters[0]!.ip)
-    expect(new Set(ips).size).toBe(ips.length)
+    b.devices['AL-LPT-0447']!.services[0]!.status = 'stopped'
+    b.devices['AL-LPT-0447']!.adapters[0]!.dns.push('9.9.9.9')
+    b.devices['AL-LPT-0447']!.eventLog.pop()
+    expect(a).toEqual(createWorld())
   })
 })

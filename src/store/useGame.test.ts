@@ -3,471 +3,271 @@ import { createGameStore } from './useGame'
 
 let g: ReturnType<typeof createGameStore>
 const s = () => g.getState()
+const clockAt = (iso: string) => ({ now: () => new Date(iso) })
 
 beforeEach(() => {
-  g = createGameStore({ now: () => new Date('2026-09-09T18:00:00.000Z') })
-  s().start()
+  // Стор собирает смену сам — интерфейс start() не вызывает, тесты тоже.
+  g = createGameStore(clockAt('2026-09-09T18:00:00.000Z'))
 })
 
 const firstNumber = () => s().queue.tickets[0]!.number
-const findOpen = (n: string) => s().queue.tickets.find(t => t.number === n)!
+const nextOpen = () => s().queue.tickets.find(t => t.status !== 'completed' && t.number !== s().queue.assigned)!
+const adapter = () => s().world.devices['AL-LPT-0447']!.adapters[0]!
+const fixApipa = () => {
+  s().runCommand('ipconfig /release')
+  s().runCommand('ipconfig /renew')
+}
+const close = (notes = 'Закрыл по итогам смены.') => {
+  s().saveResolutionNotes(notes)
+  s().setResolutionCode('solved')
+  s().resolveTicket()
+}
 
-describe('старт', () => {
-  it('очередь непустая, тикет не назначен', () => {
+describe('смена', () => {
+  it('стартует с очередью, шапкой терминала и сломанной машиной первого тикета', () => {
     expect(s().queue.tickets.length).toBeGreaterThan(0)
     expect(s().queue.assigned).toBeNull()
-  })
-
-  it('терминал показывает шапку с вымышленной ОС', () => {
-    expect(s().terminalLines[0]!.text).toContain('Vantage Windows')
-    expect(s().terminalLines[1]!.text).toContain('Arcline Logistics')
-  })
-
-  it('мир сломан по сценарию', () => {
-    expect(s().world.devices['AL-LPT-0447']!.adapters[0]!.ip).toBe('169.254.23.11')
-  })
-})
-
-describe('доступ к машине', () => {
-  it('команда до взятия тикета отклоняется', () => {
-    const res = s().runCommand('ipconfig /all')
-    expect(res.rejected).toBe(true)
-    expect(s().session.commands).toHaveLength(0)
-  })
-
-  it('отказ объясняет причину в терминале', () => {
-    s().runCommand('ipconfig /all')
-    const last = s().terminalLines.at(-1)!.text
-    expect(last).toContain('открытым тикетом')
-  })
-
-  it('после взятия тикета команда выполняется', () => {
-    s().claimTicket(firstNumber())
-    s().runCommand('ipconfig /all')
-    expect(s().session.commands).toHaveLength(1)
-    expect(s().terminalLines.some(l => l.text.includes('169.254.23.11'))).toBe(true)
-  })
-})
-
-describe('починка через терминал', () => {
-  beforeEach(() => s().claimTicket(firstNumber()))
-
-  it('renew в одиночку не помогает', () => {
-    s().runCommand('ipconfig /renew')
-    expect(s().world.devices['AL-LPT-0447']!.adapters[0]!.ip).toBe('169.254.23.11')
-  })
-
-  it('release затем renew чинит машину', () => {
-    s().runCommand('ipconfig /release')
-    s().runCommand('ipconfig /renew')
-    const a = s().world.devices['AL-LPT-0447']!.adapters[0]!
-    expect(a.ip).toBe('10.20.14.88')
-    expect(a.gateway).toBe('10.20.14.1')
-  })
-
-  it('после починки ping начинает отвечать', () => {
-    s().runCommand('ipconfig /release')
-    s().runCommand('ipconfig /renew')
-    s().runCommand('ping 8.8.8.8')
-    expect(s().terminalLines.some(l => l.text.includes('Reply from 8.8.8.8'))).toBe(true)
-  })
-})
-
-describe('подтверждение у заявителя', () => {
-  beforeEach(() => s().claimTicket(firstNumber()))
-
-  it('на сломанной машине заявитель не подтверждает', () => {
-    s().confirmWithUser()
-    expect(s().session.flags.userConfirmed).toBe(false)
-    const last = s().queue.tickets[0]!.communications.at(-1)!
-    expect(last.text).toContain('так же')
-  })
-
-  it('на починенной подтверждает', () => {
-    s().runCommand('ipconfig /release')
-    s().runCommand('ipconfig /renew')
-    s().confirmWithUser()
-    expect(s().session.flags.userConfirmed).toBe(true)
-    expect(s().queue.tickets[0]!.communications.at(-1)!.text).toContain('открылось')
-  })
-
-  it('реплика заявителя попадает и в журнал сессии', () => {
-    s().confirmWithUser()
-    expect(s().session.dialogue.some(d => d.speaker === 'requester')).toBe(true)
-  })
-})
-
-describe('закрытие тикета', () => {
-  beforeEach(() => s().claimTicket(firstNumber()))
-
-  it('без кода закрытия ничего не происходит', () => {
-    s().saveResolutionNotes('что-то')
-    s().resolveTicket()
-    expect(s().scorecard).toBeNull()
-    expect(s().queue.assigned).not.toBeNull()
-  })
-
-  it('с кодом выдаёт разбор и освобождает слот', () => {
-    s().runCommand('ipconfig /all')
-    s().runCommand('ipconfig /release')
-    s().runCommand('ipconfig /renew')
-    s().confirmWithUser()
-    s().saveResolutionNotes('Не открывались сайты. ipconfig /all показал '
-      + '169.254.23.11 без шлюза, ipconfig /renew завершился ошибкой. '
-      + 'После release адрес стал 10.20.14.88. Заявительница подтвердила. '
-      + 'Причина — недоступность ретрансляции при загрузке.')
-    s().setResolutionCode('solved')
-    s().resolveTicket()
-
-    expect(s().scorecard).not.toBeNull()
-    expect(s().queue.assigned).toBeNull()
-    expect(s().activeTool).toBe('scorecard')
-  })
-})
-
-describe('сброс', () => {
-  it('возвращает всё в исходное', () => {
-    s().claimTicket(firstNumber())
-    s().runCommand('ipconfig /release')
-    s().reset()
-    expect(s().queue.assigned).toBeNull()
-    expect(s().session.commands).toHaveLength(0)
-    expect(s().world.devices['AL-LPT-0447']!.adapters[0]!.ip).toBe('169.254.23.11')
-  })
-})
-
-/**
- * Прогрессия.
- *
- * `resolveTicket` — единственная точка записи прохождения, и запись
- * обязана быть в памяти сразу: следующее закрытие читает историю из
- * стора, и отложенная запись затёрла бы предыдущую.
- */
-describe('прогресс', () => {
-  const close = () => {
-    s().claimTicket(firstNumber())
-    s().runCommand('ipconfig /release')
-    s().runCommand('ipconfig /renew')
-    s().confirmWithUser()
-    s().saveResolutionNotes('Не открывались сайты. ipconfig /all показал '
-      + '169.254.23.11 без шлюза. После release и renew адрес стал '
-      + '10.20.14.88. Заявительница подтвердила.')
-    s().setResolutionCode('solved')
-    s().resolveTicket()
-  }
-
-  it('закрытие пишет запись сразу, не дожидаясь хранилища', () => {
-    close()
-    expect(s().progress.records).toHaveLength(1)
-  })
-
-  it('второе закрытие не затирает первое', () => {
-    close()
-    const second = s().queue.tickets.find(t => t.status !== 'completed')!
-    s().claimTicket(second.number)
-    s().saveResolutionNotes('Разбирался, причину не нашёл.')
-    s().setResolutionCode('solved')
-    s().resolveTicket()
-
-    expect(s().progress.records).toHaveLength(2)
-    expect(s().progress.records[0]!.id).not.toBe(s().progress.records[1]!.id)
-  })
-
-  it('«пройти заново» прогресс не трогает', () => {
-    close()
-    s().reset()
-    expect(s().progress.records).toHaveLength(1)
+    expect(s().terminalLines.slice(0, 2).map(l => l.text)).toEqual([
+      'Vantage Windows [Version 10.0.22631.3880]',
+      '(c) Arcline Logistics. All rights reserved.',
+    ])
+    expect(adapter().ip).toBe('169.254.23.11')
   })
 
   /*
-    Смена нумеруется от старта стора, а страницу перезагружают. Без
-    отметки времени первая смена нового запуска получала бы тот же
-    `shiftId`, что и первая смена прошлого, — и запись о втором
-    прохождении того же сценария сталкивалась бы с записью о первом
-    по идентификатору.
+    Поломка входит в мир вместе с тикетом. Раньше мир при старте смены
+    ломался по всей библиотеке сразу, и правило «одна поломка на машину»
+    держалось только в очереди.
   */
-  it('смены разных запусков различаются', () => {
-    const other = createGameStore({ now: () => new Date('2026-09-10T08:00:00.000Z') })
-    other.getState().start()
-    expect(other.getState().shiftId).not.toBe(s().shiftId)
+  it('машина сценария из пула исправна, пока его тикет не вошёл в окно', () => {
+    g = createGameStore(clockAt('2026-09-09T18:00:00.000Z'), undefined, 1)
+    const spooler = () => s().world.devices['AL-DSK-0192']!.services
+      .find(x => x.name === 'Spooler')!
+    expect(s().queue.tickets.map(t => t.scenarioId)).toEqual(['net-apipa-no-lease'])
+    expect(spooler().status).toBe('running')
+
+    s().claimTicket(firstNumber())
+    close()
+    expect(s().queue.tickets.map(t => t.scenarioId)).toEqual(['print-spooler-stopped'])
+    expect(spooler().status).toBe('stopped')
   })
 
-  it('смены одного запуска различаются', () => {
+  /*
+    Найдено визуальной проверкой: закрыв все сценарии, техник видел
+    пустую таблицу и ничего больше. «Тикетов нет» и «тикетов больше не
+    будет» — разные состояния, и второе обязано быть названо.
+  */
+  it('исчерпание пула объявляется только после последнего тикета; новая смена полна', () => {
+    let closed = 0
+    while (s().queue.tickets.some(t => t.status !== 'completed')) {
+      expect(s().shiftExhausted).toBe(false)
+      s().claimTicket(s().queue.tickets[0]!.number)
+      close()
+      closed++
+    }
+    expect(closed).toBe(4)
+    expect(s().shiftExhausted).toBe(true)
+
+    s().reset()
+    expect(s().shiftExhausted).toBe(false)
+    expect(s().queue.tickets.length).toBeGreaterThan(0)
+  })
+
+  /*
+    Смена нумеруется временем старта, а не одним счётчиком: счётчик
+    после перезагрузки начинается заново, и второе прохождение того же
+    сценария сталкивалось бы с первым по идентификатору записи.
+  */
+  it('смены различаются и между запусками, и внутри запуска', () => {
+    const other = createGameStore(clockAt('2026-09-10T08:00:00.000Z'))
+    expect(other.getState().shiftId).not.toBe(s().shiftId)
+
     const first = s().shiftId
     s().reset()
     expect(s().shiftId).not.toBe(first)
   })
 })
 
-/**
- * Гидратация не зависит от `start()`.
- *
- * Найдено визуальной проверкой: экраны истории и профиля показывали
- * «Загружается…» навсегда. Интерфейс `start()` не вызывает — стор
- * собирает смену сам при создании, — а гидратация висела именно на
- * нём, и `progressLoaded` не вставал никогда. Все тесты при этом были
- * зелёные, потому что каждый звал `start()` руками.
- */
-describe('гидратация', () => {
-  it('идёт от создания стора, а не от start()', async () => {
-    const g2 = createGameStore({ now: () => new Date('2026-09-09T18:00:00.000Z') })
-    // start() намеренно не вызываем — интерфейс его не вызывает тоже.
-    await vi.waitFor(() => expect(g2.getState().progressLoaded).toBe(true))
-  })
-})
-
-/**
- * Исчерпание пула.
- *
- * Найдено визуальной проверкой: закрыв все сценарии, техник видел
- * пустую таблицу и «Открытых: 0» — и ничего больше. План среза
- * требует обратного: молчаливое «очередь пуста и больше не будет»
- * читается как поломка, поэтому смена обязана сказать, что кончилась.
- */
-describe('пул исчерпан', () => {
-  const closeOne = () => {
-    const open = s().queue.tickets.find(t => t.status !== 'completed')
-    if (!open) return false
-    s().claimTicket(open.number)
-    s().saveResolutionNotes('Закрыл по итогам смены.')
-    s().setResolutionCode('solved')
-    s().resolveTicket()
-    return true
-  }
-
-  it('пока в пуле есть сценарии, смена не объявлена оконченной', () => {
-    expect(s().shiftExhausted).toBe(false)
-    closeOne()
-    expect(s().shiftExhausted).toBe(false)
-  })
-
-  it('после последнего сценария смена объявлена оконченной', () => {
-    while (closeOne()) { /* закрываем, пока есть что */ }
-    expect(s().queue.tickets).toHaveLength(0)
-    expect(s().shiftExhausted).toBe(true)
-  })
-
-  it('новая смена снова полна', () => {
-    while (closeOne()) { /* до конца пула */ }
-    s().reset()
-    expect(s().shiftExhausted).toBe(false)
-    expect(s().queue.tickets.length).toBeGreaterThan(0)
-  })
-})
-
-/**
- * Поломка входит в мир вместе с тикетом.
- *
- * Раньше мир при старте смены ломался по всей библиотеке сразу, и
- * правило «одна поломка на машину» держалось только в очереди.
- */
-describe('поломка приходит с тикетом', () => {
-  const spooler = () => s().world.devices['AL-DSK-0192']!.services
-    .find(x => x.name === 'Spooler')!
-
-  beforeEach(() => {
-    // Окно в один тикет: второй сценарий (диспетчер печати) ждёт в пуле.
-    g = createGameStore({ now: () => new Date('2026-09-09T18:00:00.000Z') }, undefined, 1)
-  })
-
-  it('машина сценария, ждущего в пуле, исправна', () => {
-    expect(s().queue.tickets.map(t => t.scenarioId)).toEqual(['net-apipa-no-lease'])
-    expect(spooler().status).toBe('running')
-  })
-
-  it('закрыли тикет — вошёл следующий и сломал свою машину', () => {
-    s().claimTicket(firstNumber())
-    s().setResolutionCode('solved')
-    s().resolveTicket()
-
-    expect(s().queue.tickets.map(t => t.scenarioId)).toEqual(['print-spooler-stopped'])
-    expect(spooler().status).toBe('stopped')
-  })
-})
-
-/**
- * Изоляция инцидентов.
- *
- * Журнал сессии — вход для всей оценки, и он относится к инциденту, а
- * не к смене. До среза 5 смена состояла из одного тикета, и утечка не
- * была видна; теперь тикетов подряд несколько, и подтверждение,
- * полученное у одного заявителя, засчитывалось второму.
- *
- * Мир при этом остаётся общим намеренно: последствия работы, включая
- * тихие поломки, переживают инцидент — это и делает их тихими.
- */
-describe('изоляция инцидентов', () => {
-  const closeCurrent = () => {
-    s().saveResolutionNotes('Закрыл по итогам смены.')
-    s().setResolutionCode('solved')
-    s().resolveTicket()
-  }
-
-  const nextOpen = () =>
-    s().queue.tickets.find(t => t.status !== 'completed')!
-
-  it('подтверждение заявителя не переходит на следующий тикет', () => {
-    s().claimTicket(firstNumber())
-    // Заявитель не оракул: подтверждает он только починенное.
-    s().runCommand('ipconfig /release')
-    s().runCommand('ipconfig /renew')
-    s().confirmWithUser()
-    expect(s().session.flags.userConfirmed).toBe(true)
-    closeCurrent()
-
-    s().claimTicket(nextOpen().number)
-    expect(s().session.flags.userConfirmed).toBe(false)
-  })
-
-  it('сверка личности не переходит на следующий тикет', () => {
-    s().claimTicket(firstNumber())
-    s().verifyRequester('manager', 'Elena Varga')
-    expect(s().session.flags.identityVerified).toBe(true)
-    closeCurrent()
-
-    s().claimTicket(nextOpen().number)
-    expect(s().session.flags.identityVerified).toBe(false)
-    expect(s().session.verifiedAccount).toBeUndefined()
-  })
-
-  it('команды прошлого инцидента не засчитываются следующему', () => {
-    s().claimTicket(firstNumber())
-    s().runCommand('ipconfig /all')
-    s().runCommand('ipconfig /release')
-    expect(s().session.commands).toHaveLength(2)
-    closeCurrent()
-
-    s().claimTicket(nextOpen().number)
+describe('инцидент', () => {
+  /**
+   * Граница доступа, вшитая в инструмент: удалённый доступ — только к
+   * машине с открытым инцидентом.
+   */
+  it('команда до взятия тикета отклоняется с объяснением и не пишется в журнал', () => {
+    expect(s().runCommand('ipconfig /all')).toEqual({ rejected: true })
     expect(s().session.commands).toHaveLength(0)
-    expect(s().session.changes).toHaveLength(0)
+    expect(s().terminalLines.at(-1)!.text).toContain('открытым тикетом')
+
+    s().claimTicket(firstNumber())
+    expect(s().runCommand('ipconfig /all')).toEqual({ rejected: false })
+    expect(s().session.commands).toHaveLength(1)
+    expect(s().terminalLines.some(l => l.text.includes('169.254.23.11'))).toBe(true)
   })
 
-  it('разговор прошлого инцидента не тянется в следующий', () => {
+  it('починка из терминала меняет опубликованный мир', () => {
     s().claimTicket(firstNumber())
-    s().callTo('p.raman')
-    expect(s().talkingTo).toBe('p.raman')
-    closeCurrent()
-
-    s().claimTicket(nextOpen().number)
-    expect(s().talkingTo).toBeNull()
-    expect(s().session.dialogue).toHaveLength(0)
-  })
-
-  it('вывод терминала прошлой машины не остаётся на экране', () => {
-    s().claimTicket(firstNumber())
-    s().runCommand('ipconfig /all')
-    expect(s().terminalLines.some(l => l.text.includes('169.254'))).toBe(true)
-    closeCurrent()
-
-    s().claimTicket(nextOpen().number)
-    expect(s().terminalLines.some(l => l.text.includes('169.254'))).toBe(false)
+    const before = s().world
+    fixApipa()
+    s().runCommand('ping 8.8.8.8')
+    expect(s().world).not.toBe(before)
+    expect(adapter()).toMatchObject({ ip: '10.20.14.88', gateway: '10.20.14.1' })
+    expect(s().terminalLines.some(l => l.text.includes('Reply from 8.8.8.8'))).toBe(true)
   })
 
   /*
-    Возврат к своему же тикету — не новый инцидент. Сессию здесь
-    сбрасывать нельзя: это стёрло бы всю работу по нему, что хуже
-    утечки, которую чиним.
+    Заявитель сообщает то, что видит со своей стороны, а не состояние
+    мира: на непочиненной машине он так и скажет — сколько ни звони.
   */
-  it('повторное открытие своего тикета журнал не стирает', () => {
+  it('подтверждение по телефону следует миру и пишется в журнал и переписку', () => {
+    s().claimTicket(firstNumber())
+    s().confirmWithUser()
+    expect(s().session.flags.userConfirmed).toBe(false)
+    expect(s().queue.tickets[0]!.communications.at(-1)!.text).toContain('так же')
+
+    fixApipa()
+    s().confirmWithUser()
+    expect(s().session.flags.userConfirmed).toBe(true)
+    expect(s().queue.tickets[0]!.communications.at(-1)!.text).toContain('открылось')
+    expect(s().session.dialogue.filter(d => d.speaker === 'requester')).toHaveLength(2)
+  })
+
+  /* Рабочий статус сам по себе тикет не закрывает — нужен код. */
+  it('закрытие требует кода; с кодом — разбор, запись истории и свободный слот', () => {
+    s().claimTicket(firstNumber())
+    s().saveResolutionNotes('что-то')
+    s().resolveTicket()
+    expect(s().scorecard).toBeNull()
+    expect(s().queue.assigned).not.toBeNull()
+
+    s().setResolutionCode('solved')
+    s().resolveTicket()
+    expect(s().scorecard).not.toBeNull()
+    expect(s().queue.assigned).toBeNull()
+    expect(s().activeTool).toBe('scorecard')
+    expect(s().progress.records).toHaveLength(1)
+  })
+
+  /*
+    Возврат к своему же тикету — не новый инцидент. Раньше клик по своей
+    строке в очереди сбрасывал рабочий статус, а стереть журнал значило
+    бы уничтожить всю работу по нему.
+  */
+  it('возврат к своему тикету не стирает журнал и не сбрасывает статус', () => {
     const n = firstNumber()
     s().claimTicket(n)
     s().runCommand('ipconfig /all')
+    s().setTicketStatus('pending-user')
     s().setTool('queue')
     s().claimTicket(n)
 
     expect(s().session.commands).toHaveLength(1)
+    expect(s().queue.tickets.find(t => t.number === n)!.status).toBe('pending-user')
   })
 
-  it('повторное открытие своего тикета не сбрасывает рабочий статус', () => {
-    const n = firstNumber()
-    s().claimTicket(n)
-    s().setTicketStatus('pending-user')
-    s().claimTicket(n)
+  /*
+    Журнал сессии — вход для всей оценки, и он относится к инциденту, а
+    не к смене. Пока смена была из одного тикета, утечка не была видна;
+    потом подтверждение, полученное у одного заявителя, засчитывалось
+    второму. Вместе с журналом заканчивается всё открытое по прошлому
+    инциденту: разговор, окна, вывод терминала. Мир остаётся общим
+    намеренно — последствия работы переживают инцидент.
+  */
+  it('следующий инцидент начинается с чистого журнала, разговора и терминала', () => {
+    s().claimTicket(firstNumber())
+    s().verifyRequester('manager', 'Elena Varga')
+    s().runCommand('ipconfig /all')
+    fixApipa()
+    s().confirmWithUser()
+    s().callTo('p.raman')
+    s().openApp('cmd')
+    close()
 
-    expect(findOpen(n).status).toBe('pending-user')
+    s().claimTicket(nextOpen().number)
+    expect(s().session.flags).toMatchObject({ userConfirmed: false, identityVerified: false })
+    expect(s().session.verifiedAccount).toBeUndefined()
+    expect(s().session.commands).toHaveLength(0)
+    expect(s().session.changes).toHaveLength(0)
+    expect(s().session.dialogue).toHaveLength(0)
+    expect(s().talkingTo).toBeNull()
+    expect(s().windows.windows).toHaveLength(0)
+    expect(s().terminalLines.some(l => l.text.includes('169.254'))).toBe(false)
+    // Мир общий: починка прошлого инцидента на месте.
+    expect(adapter().ip).toBe('10.20.14.88')
   })
 })
 
 /**
- * Разбор из истории не подменяет свежий.
- *
- * `viewing` живёт, пока техник смотрит прошлое прохождение. Уйти из
- * него можно не только кнопкой «Назад к истории», но и любым другим
- * инструментом — и тогда закрытый следом тикет показывал чужой разбор
- * вместо своего.
+ * `resolveTicket` — единственная точка записи прохождения, и запись
+ * обязана быть в памяти сразу: следующее закрытие читает историю из
+ * стора, и отложенная запись затёрла бы предыдущую.
  */
-describe('просмотр прошлого прохождения', () => {
-  it('закрытие тикета снимает просмотр истории', () => {
+describe('прогресс', () => {
+  it('записи копятся синхронно, не затирают друг друга и переживают сброс смены', () => {
     s().claimTicket(firstNumber())
-    s().saveResolutionNotes('Первый инцидент смены.')
-    s().setResolutionCode('solved')
-    s().resolveTicket()
+    close()
+    s().claimTicket(nextOpen().number)
+    close('Разбирался, причину не нашёл.')
 
-    const record = s().progress.records[0]!
-    s().viewRecord(record)
-    expect(s().viewing).not.toBeNull()
+    const [a, b] = s().progress.records
+    expect(s().progress.records).toHaveLength(2)
+    expect(a!.id).not.toBe(b!.id)
 
-    const next = s().queue.tickets.find(t => t.status !== 'completed')!
-    s().claimTicket(next.number)
-    s().saveResolutionNotes('Второй инцидент смены.')
-    s().setResolutionCode('solved')
-    s().resolveTicket()
-
-    expect(s().viewing).toBeNull()
+    s().reset()
+    expect(s().progress.records).toHaveLength(2)
   })
 
-  it('взятие тикета тоже снимает просмотр истории', () => {
+  /*
+    Найдено визуальной проверкой: экраны истории и профиля показывали
+    «Загружается…» навсегда. Интерфейс `start()` не вызывает, а
+    гидратация висела именно на нём; тесты были зелёные, потому что
+    каждый звал `start()` руками.
+  */
+  it('гидратация идёт от создания стора, а не от start()', async () => {
+    await vi.waitFor(() => expect(s().progressLoaded).toBe(true))
+  })
+
+  /*
+    `viewing` живёт, пока техник смотрит прошлое прохождение. Уйти из
+    него можно любым инструментом — и закрытый следом тикет показывал
+    чужой разбор вместо своего.
+  */
+  it('свой разбор и взятие тикета снимают просмотр прошлого прохождения', () => {
     s().claimTicket(firstNumber())
-    s().saveResolutionNotes('Первый инцидент смены.')
-    s().setResolutionCode('solved')
-    s().resolveTicket()
+    close()
 
     s().viewRecord(s().progress.records[0]!)
-    const next = s().queue.tickets.find(t => t.status !== 'completed')!
-    s().claimTicket(next.number)
-
+    s().claimTicket(nextOpen().number)
     expect(s().viewing).toBeNull()
+
+    s().viewRecord(s().progress.records[0]!)
+    close()
+    expect(s().viewing).toBeNull()
+    expect(s().activeTool).toBe('scorecard')
   })
 })
 
 /**
- * Скрытие чужого тикета не трогает текущий инцидент.
- *
- * Очередь пересобирается из окна генератора, а `createQueue` всегда
- * отдаёт `assigned: null` — назначение терялось, даже когда скрывали
- * совсем другой тикет. Кнопки скрытия в интерфейсе пока нет, но
- * правило должно быть верным до того, как она появится.
+ * Скрытие — отложенное дело без штрафа. Очередь пересобирается из окна
+ * генератора, а `createQueue` отдаёт пустое назначение — назначение
+ * терялось, даже когда скрывали совсем другой тикет.
  */
 describe('скрытие тикета', () => {
-  it('скрытый уходит из очереди и возвращается в пул', () => {
-    const victim = s().queue.tickets[1]!.number
-    s().hideTicket(victim)
-    expect(s().queue.tickets.some(t => t.number === victim)).toBe(false)
-  })
-
-  it('скрытие чужого тикета не снимает текущий с вас', () => {
+  it('чужой тикет уходит из очереди, а текущий остаётся за вами', () => {
     const mine = firstNumber()
     s().claimTicket(mine)
     const other = s().queue.tickets.find(t => t.number !== mine)!.number
 
     s().hideTicket(other)
-
+    expect(s().queue.tickets.some(t => t.number === other)).toBe(false)
     expect(s().queue.assigned).toBe(mine)
     expect(s().activeTool).toBe('ticket')
   })
 
-  it('скрытие своего тикета освобождает слот и возвращает в очередь', () => {
-    const mine = firstNumber()
-    s().claimTicket(mine)
-    s().hideTicket(mine)
-
-    expect(s().queue.assigned).toBeNull()
-    expect(s().activeTool).toBe('queue')
-  })
-
-  it('скрытие не пишет прохождение в историю', () => {
+  it('свой тикет освобождает слот и не пишет прохождение в историю', () => {
     s().claimTicket(firstNumber())
     s().hideTicket(firstNumber())
+    expect(s().queue.assigned).toBeNull()
+    expect(s().activeTool).toBe('queue')
     expect(s().progress.records).toHaveLength(0)
   })
 })

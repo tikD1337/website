@@ -26,66 +26,48 @@ function rec(
   }
 }
 
+/*
+  Счётчики выводятся из истории, а не инкрементируются: счётчик,
+  который увеличивают при закрытии, расходится с историей при первом
+  же сбое записи.
+*/
 describe('счётчики', () => {
-  it('пустая история — всё по нулям', () => {
-    const c = countersOf([])
-    expect(c.closed).toBe(0)
-    expect(c.flawless).toBe(0)
-    expect(c.streak).toBe(0)
-    expect(c.bestStreak).toBe(0)
-    expect(c.totalPoints).toBe(0)
-  })
-
-  it('закрытые и безупречные считаются раздельно', () => {
-    const c = countersOf([rec(1, 'full'), rec(2, 'partial'), rec(3, 'full')])
-    expect(c.closed).toBe(3)
-    expect(c.flawless).toBe(2)
-  })
-
-  it('очки складываются', () => {
-    const c = countersOf([rec(1, 'full', { points: 54 }), rec(2, 'partial', { points: 30 })])
-    expect(c.totalPoints).toBe(84)
+  it('закрытые, безупречные, очки и тихие поломки — штуками и тикетами', () => {
+    expect(countersOf([])).toMatchObject({
+      closed: 0, flawless: 0, streak: 0, bestStreak: 0, totalPoints: 0,
+    })
+    expect(countersOf([
+      rec(1, 'fail', { points: 10, faults: 2 }),
+      rec(2, 'full', { points: 54 }),
+      rec(3, 'partial', { points: 30, faults: 1 }),
+      rec(4, 'full', { points: 50 }),
+    ])).toMatchObject({
+      closed: 4, flawless: 2, totalPoints: 144, silentFaults: 3, ticketsWithFaults: 2,
+    })
   })
 
   /*
-    Серия — это то, что прерывается. Проверяем именно обрыв: счётчик,
+    Серия — это то, что прерывается. Проверяется именно обрыв: счётчик,
     который только растёт, выглядел бы правильным на всех записях,
     кроме тех, ради которых он заведён.
   */
-  it('неполный вердикт обрывает серию', () => {
-    const c = countersOf([rec(1, 'full'), rec(2, 'full'), rec(3, 'partial'), rec(4, 'full')])
-    expect(c.streak).toBe(1)
-    expect(c.bestStreak).toBe(2)
+  it('серия обрывается неполным вердиктом, лучшая серия помнится', () => {
+    const streaks = (...v: Array<'full' | 'partial' | 'fail'>) => {
+      const c = countersOf(v.map((x, i) => rec(i + 1, x)))
+      return [c.streak, c.bestStreak]
+    }
+    expect(streaks('full', 'full', 'partial', 'full')).toEqual([1, 2])
+    expect(streaks('full', 'full', 'full')).toEqual([3, 3])
+    expect(streaks('full', 'full', 'fail')).toEqual([0, 2])
   })
 
-  it('серия без обрывов равна лучшей', () => {
-    const c = countersOf([rec(1, 'full'), rec(2, 'full'), rec(3, 'full')])
-    expect(c.streak).toBe(3)
-    expect(c.bestStreak).toBe(3)
-  })
-
-  it('провал в конце обнуляет текущую серию, но не лучшую', () => {
-    const c = countersOf([rec(1, 'full'), rec(2, 'full'), rec(3, 'fail')])
-    expect(c.streak).toBe(0)
-    expect(c.bestStreak).toBe(2)
-  })
-
-  it('тихие поломки считаются и штуками, и тикетами', () => {
-    const c = countersOf([rec(1, 'fail', { faults: 2 }), rec(2, 'full'), rec(3, 'fail', { faults: 1 })])
-    expect(c.silentFaults).toBe(3)
-    expect(c.ticketsWithFaults).toBe(2)
-  })
-})
-
-describe('очки за неделю', () => {
-  it('считаются только записи своей недели', () => {
+  it('очки за неделю — только записи своей недели', () => {
     const history = [
       rec(1, 'full', { points: 50, week: '2026-W36' }),
       rec(2, 'full', { points: 40, week: '2026-W37' }),
       rec(3, 'partial', { points: 20, week: '2026-W37' }),
     ]
-    expect(pointsInWeek(history, '2026-W37')).toBe(60)
-    expect(pointsInWeek(history, '2026-W36')).toBe(50)
-    expect(pointsInWeek(history, '2026-W35')).toBe(0)
+    expect(['2026-W37', '2026-W36', '2026-W35'].map(w => pointsInWeek(history, w)))
+      .toEqual([60, 50, 0])
   })
 })

@@ -11,73 +11,34 @@ const ctx = (): CommandContext => ({
   device: 'AL-LPT-0447',
 })
 
+/*
+  Реестр — единственное место, где команда попадает в журнал сессии, и
+  нераспознанные и упавшие команды пишутся наравне с успешными: оценка
+  смотрит на весь путь техника, а не только на удачные шаги.
+*/
 describe('реестр команд', () => {
-  it('вызывает зарегистрированный обработчик', () => {
-    const r = createRegistry()
-    r.register('echo', args => ({ stdout: args.join(' '), exitCode: 0 }))
-    expect(r.run('echo привет мир', ctx()).stdout).toBe('привет мир')
-  })
-
-  it('находит команду независимо от регистра', () => {
-    const r = createRegistry()
-    r.register('ipconfig', () => ({ stdout: 'ok', exitCode: 0 }))
-    expect(r.run('IPCONFIG', ctx()).exitCode).toBe(0)
-  })
-
-  it('неизвестная команда отвечает как настоящий cmd', () => {
-    const r = createRegistry()
-    const res = r.run('wat', ctx())
-    expect(res.stdout).toBe(
-      "'wat' is not recognized as an internal or external command,\r\n"
-      + 'operable program or batch file.')
-    expect(res.exitCode).toBe(1)
-  })
-
-  it('пустая строка ничего не делает и не пишется в журнал', () => {
+  it('находит обработчик без учёта регистра, передаёт машину и пишет строку в журнал', () => {
     const c = ctx()
     const r = createRegistry()
-    expect(r.run('   ', c)).toEqual({ stdout: '', exitCode: 0 })
-    expect(c.session.commands).toHaveLength(0)
-  })
+    r.register('where', (args, cx) => ({ stdout: `${cx.device} ${args.join(' ')}`, exitCode: 0 }))
 
-  it('пишет выполненную команду в журнал сессии', () => {
-    const r = createRegistry()
-    r.register('echo', () => ({ stdout: 'ok', exitCode: 0 }))
-    const c = ctx()
-    r.run('echo hi', c)
-    expect(c.session.commands).toHaveLength(1)
-    expect(c.session.commands[0]).toMatchObject({
-      device: 'AL-LPT-0447', cmdline: 'echo hi', exitCode: 0,
-    })
-  })
-
-  it('нераспознанную команду тоже пишет в журнал — это тоже действие техника', () => {
-    const c = ctx()
-    const r = createRegistry()
-    r.run('wat', c)
-    expect(c.session.commands).toHaveLength(1)
-    expect(c.session.commands[0]!.exitCode).toBe(1)
-  })
-
-  it('нормализует записанную строку, срезая лишние пробелы', () => {
-    const c = ctx()
-    const r = createRegistry()
-    r.register('ping', () => ({ stdout: '', exitCode: 0 }))
-    r.run('   ping   8.8.8.8   ', c)
-    expect(c.session.commands[0]!.cmdline).toBe('ping   8.8.8.8')
-  })
-
-  it('has сообщает о зарегистрированных командах', () => {
-    const r = createRegistry()
-    r.register('ipconfig', () => ({ stdout: '', exitCode: 0 }))
-    expect(r.has('ipconfig')).toBe(true)
-    expect(r.has('IPCONFIG')).toBe(true)
+    expect(r.run('   WHERE   a b   ', c)).toEqual({ stdout: 'AL-LPT-0447 a b', exitCode: 0 })
+    expect(r.has('Where')).toBe(true)
     expect(r.has('nslookup')).toBe(false)
+    expect(c.session.commands).toEqual([{
+      at: '2026-09-09T18:00:00.000Z', device: 'AL-LPT-0447', cmdline: 'WHERE   a b', exitCode: 0,
+    }])
   })
 
-  it('передаёт обработчику машину из контекста', () => {
+  it('неизвестная команда отвечает как cmd и тоже пишется; пустая строка — нет', () => {
+    const c = ctx()
     const r = createRegistry()
-    r.register('where', (_a, c) => ({ stdout: c.device, exitCode: 0 }))
-    expect(r.run('where', ctx()).stdout).toBe('AL-LPT-0447')
+    expect(r.run('wat', c)).toEqual({
+      stdout: "'wat' is not recognized as an internal or external command,\r\n"
+        + 'operable program or batch file.',
+      exitCode: 1,
+    })
+    expect(r.run('   ', c)).toEqual({ stdout: '', exitCode: 0 })
+    expect(c.session.commands.map(x => [x.cmdline, x.exitCode])).toEqual([['wat', 1]])
   })
 })
