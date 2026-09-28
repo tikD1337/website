@@ -389,3 +389,117 @@ describe('серверная', () => {
     expect(s().world).toEqual(before)
   })
 })
+
+describe('логистика', () => {
+  const T0 = '2026-09-28T10:00:00.000Z'
+  let t = Date.parse(T0)
+  const clock = { now: () => new Date(t) }
+  const DOCK_OK = { path: 'cmdb[attachedTo=AL-LPT-0512&kind=dock&condition=ok]', exists: true, message: '' }
+  /* Заглушка док-сценария: настоящий появится в задаче 7, стору нужна только проводка. */
+  const dock: Scenario = {
+    ...apipaNoLease, id: 'dock', device: 'AL-LPT-0512', requester: 'e.varga', resources: [],
+    inject: [{ path: 'cmdb[tag=AL-P2031].condition', value: 'faulty' }],
+    objectives: [{
+      id: 'obj-replace', title: 'Док заменён', steps: [], commands: [], requires: [], state: [DOCK_OK], why: '',
+    }],
+    fixedWhen: [DOCK_OK],
+  }
+  const ticketOf = (id: string) => s().queue.tickets.find(x => x.scenarioId === id)!
+  const swap = () => s().createShipment({ type: 'dock-monitor-swap', assetTag: 'AL-P2040' })
+
+  beforeEach(() => {
+    t = Date.parse(T0)
+    g = createGameStore(clock, undefined, 2, [dock, apipaNoLease])
+  })
+
+  /*
+    Пока курьер везёт замену, техник берёт следующий тикет. Журнал,
+    вывод терминала и консоли инцидента паркуются и возвращаются при
+    повторном взятии: журнал принадлежит инциденту и после перерыва.
+  */
+  it('ждущий поставку тикет отпускает слот; журнал и консоли возвращаются при повторном взятии', () => {
+    s().claimTicket(ticketOf('dock').number)
+    s().runCommand('ipconfig /all')
+    s().runSwitchCommand('SW-FL3-01', 'enable')
+    expect(s().waitForShipment())
+      .toEqual({ ok: false, error: 'по тикету нет отправления в пути — ждать нечего' })
+
+    expect(swap()).toMatchObject({ ok: true, id: 'SHP-1041' })
+    expect(s().waitForShipment()).toEqual({ ok: true })
+    expect(s().queue.assigned).toBeNull()
+    expect(ticketOf('dock').status).toBe('pending-shipment')
+    expect(s().session.commands).toHaveLength(0)
+    expect(s().consoles).toEqual({})
+
+    s().claimTicket(ticketOf('net-apipa-no-lease').number)
+    expect(s().session.incident!.device).toBe('AL-LPT-0447')
+    close()
+
+    s().claimTicket(ticketOf('dock').number)
+    expect(s().session.commands.map(c => c.cmdline)).toEqual(['ipconfig /all', 'enable'])
+    expect(s().session.changes).toHaveLength(1)
+    expect(s().consoles['SW-FL3-01']!.cli.mode).toBe('enable')
+    expect(s().parked).toEqual({})
+  })
+
+  it('тик двигает отправления и возобновляет ждущий тикет; закрытый не возобновляется', () => {
+    const idle = s().world
+    s().tick()
+    expect(s().world).toBe(idle)
+
+    s().claimTicket(ticketOf('dock').number)
+    swap()
+    s().waitForShipment()
+    t += 90_000
+    s().tick()
+    expect(s().now.toISOString()).toBe('2026-09-28T10:01:30.000Z')
+    expect(ticketOf('dock')).toMatchObject({
+      status: 'in-progress',
+      workNotes: '10:01 Отправление SHP-1041 доставлено: Стол 3-20 (Elena Varga).',
+    })
+    s().claimTicket(ticketOf('dock').number)
+    s().confirmWithUser()
+    expect(s().session.flags.userConfirmed).toBe(true)
+
+    // Закрыт до доставки: доставка доезжает, но тикет не оживает и ничего не падает.
+    g = createGameStore(clock, undefined, 2, [dock, apipaNoLease])
+    const number = ticketOf('dock').number
+    s().claimTicket(number)
+    swap()
+    close()
+    t += 90_000
+    expect(() => s().tick()).not.toThrow()
+    expect(s().queue.tickets.some(x => x.number === number)).toBe(false)
+  })
+
+  /*
+    Номер тикета выводится из сценария: скрытый и вернувшийся тикет —
+    тот же номер. Парковка, пережившая скрытие, отдала бы новому
+    экземпляру журнал брошенного.
+  */
+  it('сброс смены и скрытие тикета забывают запаркованное', () => {
+    s().claimTicket(ticketOf('dock').number)
+    swap()
+    s().waitForShipment()
+    expect(Object.keys(s().parked)).toEqual([ticketOf('dock').number])
+    s().reset()
+    expect(s().parked).toEqual({})
+
+    s().claimTicket(ticketOf('dock').number)
+    s().createShipment({ type: 'dock-monitor-swap', assetTag: 'AL-P2041' })
+    s().waitForShipment()
+    s().hideTicket(ticketOf('dock').number)
+    expect(s().parked).toEqual({})
+  })
+
+  it('отправка и ожидание — только по взятому тикету; открытое окно и карточка — доказательства', () => {
+    const none = { ok: false, error: 'нет активного инцидента' }
+    expect(swap()).toEqual(none)
+    expect(s().waitForShipment()).toEqual(none)
+
+    s().claimTicket(ticketOf('dock').number)
+    s().openApp('devmgmt')
+    s().inspectObject('asset', 'AL-P2031')
+    expect(s().session.inspected).toEqual(['app:devmgmt', 'asset:al-p2031'])
+  })
+})

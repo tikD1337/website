@@ -4,8 +4,11 @@ import { allHold } from '../core/scenario/check'
 import { applyInject, createWorld } from '../core/world/world'
 import { SCENARIOS } from '../scenarios'
 import {
-  createQueue, claim, setStatus, resolve, findTicket,
+  createQueue, claim, setStatus, resolve, findTicket, park, resume,
 } from '../core/tickets/queue'
+import { createShipment as ship, type ShipmentInput, type ShipResult } from '../core/logistics/ship'
+import { advanceShipments } from '../core/logistics/advance'
+import { STAGES } from '../core/logistics/types'
 import {
   createQueueGenerator, fillQueue, SHIFT_WINDOW,
 } from '../core/tickets/generate'
@@ -81,6 +84,17 @@ export interface SwitchConsole {
   draft: string
 }
 
+/**
+ * Инцидент тикета, ждущего поставку: всё, что начато по нему, до
+ * повторного взятия. Журнал принадлежит инциденту и после перерыва.
+ */
+export interface ParkedIncident {
+  session: SessionLog
+  terminalLines: TerminalLine[]
+  consoles: Record<string, SwitchConsole>
+  windows: WindowsState
+}
+
 export interface GameState {
   world: WorldState
   queue: QueueState
@@ -96,6 +110,8 @@ export interface GameState {
    * тем же протеканием, что и журнал.
    */
   consoles: Record<string, SwitchConsole>
+  /** инциденты тикетов «Ждём поставку», по номеру тикета */
+  parked: Record<string, ParkedIncident>
   scorecard: Scorecard | null
   /** сценарий закрытого тикета — разбор показывает его корневую причину */
   scoredScenarioId: string | null
@@ -186,7 +202,14 @@ export interface GameState {
   removeUserFromGroup(sam: string, group: string): AccountResult
   grantShareAccess(sam: string, sharePath: string): AccountResult
   /** техник открыл карточку объекта в консоли — это тоже проверка */
-  inspectObject(kind: 'user' | 'group' | 'device' | 'port' | 'svi', id: string): void
+  inspectObject(kind: 'user' | 'group' | 'device' | 'port' | 'svi' | 'asset', id: string): void
+
+  /** Часы: двигают отправления и время на экране. Интерфейс зовёт раз в секунду. */
+  tick(): void
+  /** Оформить отправление по взятому тикету. */
+  createShipment(input: ShipmentInput): ShipResult
+  /** «Ждём поставку»: отпустить слот, запарковать инцидент. */
+  waitForShipment(): { ok: boolean; error?: string }
 
   /** Открыть сеанс консоли коммутатора, если он ещё не открыт. */
   openConsole(device: string): void
@@ -307,6 +330,7 @@ export function createGameStore(
       activeTool: 'queue' as Tool,
       terminalLines: banner(),
       consoles: {},
+      parked: {},
       scorecard: null,
       scoredScenarioId: null,
       windows: createWindows(),
@@ -434,6 +458,7 @@ export function createGameStore(
 
       claim(q, number, clock)
       const claimed = findTicket(q, number)
+      const { [number]: parkedHere, ...restParked } = st.parked
 
       /*
         Новый инцидент — новый журнал.
@@ -453,13 +478,21 @@ export function createGameStore(
       set({
         queue: { ...q },
         activeTool: 'ticket',
-        // Журнал знает свой инцидент: по нему шлюз решает, чей порт в области тикета.
-        session: createSession({
-          number, device: claimed.device, requester: claimed.requester,
+        /*
+          Тикет, ждавший поставку, возвращается со своим инцидентом:
+          журнал, вывод и консоли — те, что были до перерыва. Иначе
+          всё, что техник выяснил до отправки, пропадало бы из оценки.
+        */
+        ...(parkedHere ?? {
+          // Журнал знает свой инцидент: по нему шлюз решает, чей порт в области тикета.
+          session: createSession({
+            number, device: claimed.device, requester: claimed.requester,
+          }),
+          terminalLines: banner(),
+          consoles: {},
+          windows: createWindows(),
         }),
-        terminalLines: banner(),
-        consoles: {},
-        windows: createWindows(),
+        parked: restParked,
         channel: 'call',
         talkingTo: null,
         waitingReply: false,
@@ -825,15 +858,22 @@ export function createGameStore(
       const st = get()
       openWindow(st.windows, id)
 
+      /*
+        Открытое окно — доказательство, как открытая карточка: цель
+        «посмотреть диспетчер устройств» закрывается записью
+        `gui:app:devmgmt`. Без взятого тикета журнал черновой — писать
+        некуда.
+      */
+      const key = `app:${id}`
+      if (st.queue.assigned && !st.session.inspected.includes(key)) st.session.inspected.push(key)
+
       // Открытие просмотра событий — само по себе действие техника:
       // именно оно отличает «запустил службу» от «разобрался».
       if (id === 'eventvwr' && !st.session.flags.eventLogRead) {
         setFlag(st.session, 'eventLogRead', true)
-        set({ windows: { ...st.windows }, session: { ...st.session } })
-        return
       }
 
-      set({ windows: { ...st.windows } })
+      set({ windows: { ...st.windows }, session: { ...st.session } })
     },
 
     closeApp(id) {
@@ -1056,6 +1096,75 @@ export function createGameStore(
       set({ session: { ...st.session }, queue: { ...st.queue } })
     },
 
+    tick() {
+      const st = get()
+      const now = clock.now()
+      const events = advanceShipments(st.world, now)
+      if (events.length === 0) {
+        set({ now })
+        return
+      }
+
+      /*
+        Доставка по тикету дописывает рабочую заметку и возвращает
+        ждущий тикет в работу. Закрытый тикет из окна смены уже ушёл —
+        его доставка просто меняет учёт.
+      */
+      const q = st.queue
+      for (const e of events) {
+        if (!e.final || e.direction !== 'to-desk' || !e.ticket) continue
+        const t = q.tickets.find(x => x.number === e.ticket)
+        const sh = st.world.shipments.find(x => x.id === e.id)
+        if (!t || !sh) continue
+        const line = `${sh.history.at(-1)!.at.slice(11, 16)} Отправление ${e.id} доставлено: ${sh.destination}.`
+        t.workNotes = t.workNotes ? `${t.workNotes}\n${line}` : line
+        resume(q, e.ticket)
+      }
+      set({ now, world: { ...st.world }, queue: { ...q } })
+    },
+
+    createShipment(input) {
+      const st = get()
+      if (!st.queue.assigned) return { ok: false, error: 'нет активного инцидента' }
+      const r = ship(st.world, input, st.session, clock)
+      set({ world: { ...st.world }, session: { ...st.session } })
+      return r
+    },
+
+    waitForShipment() {
+      const st = get()
+      const number = st.queue.assigned
+      if (!number) return { ok: false, error: 'нет активного инцидента' }
+
+      // Правило живёт здесь, а не в кнопке: ждать можно только то, что едет.
+      const last = STAGES['to-desk'].length - 1
+      const enRoute = st.world.shipments.some(x =>
+        x.ticket === number && x.direction === 'to-desk' && x.stage < last)
+      if (!enRoute) return { ok: false, error: 'по тикету нет отправления в пути — ждать нечего' }
+
+      park(st.queue, number)
+      set({
+        queue: { ...st.queue },
+        parked: {
+          ...st.parked,
+          [number]: {
+            session: st.session, terminalLines: st.terminalLines,
+            consoles: st.consoles, windows: st.windows,
+          },
+        },
+        session: createSession(),
+        terminalLines: banner(),
+        consoles: {},
+        windows: createWindows(),
+        channel: 'call',
+        talkingTo: null,
+        waitingReply: false,
+        dialogueNotice: null,
+        activeTool: 'queue',
+      })
+      return { ok: true }
+    },
+
     checkShareAccess(sam, sharePath) {
       return hasShareAccess(get().world, sam, sharePath)
     },
@@ -1153,9 +1262,12 @@ export function createGameStore(
       const queue = createQueue(generator.tickets)
       if (!hidMine) queue.assigned = q.assigned
 
+      // Номер тикета выводится из сценария: вернувшийся экземпляр не должен найти чужую парковку.
+      const { [number]: _dropped, ...parked } = st.parked
       const next = {
         world: { ...st.world },
         queue,
+        parked,
         shiftExhausted: generator.exhausted,
       }
       if (hidMine) set({ ...next, activeTool: 'queue' })
