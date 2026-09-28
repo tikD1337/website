@@ -5,6 +5,8 @@ import { TicketView } from './TicketView'
 import { RemoteDesktop } from './RemoteDesktop'
 import { DirectoryConsole } from './apps/DirectoryConsole'
 import { ServerRoom } from './ServerRoom'
+import { AssetsView } from './AssetsView'
+import { LogisticsView } from './LogisticsView'
 import { CommsView } from './CommsView'
 import { SettingsView } from './SettingsView'
 import { ScorecardView } from './ScorecardView'
@@ -19,6 +21,8 @@ const TOOLS: Array<{ id: Tool; label: string }> = [
   { id: 'terminal', label: 'Удалёнка' },
   { id: 'directory', label: 'Каталог' },
   { id: 'serverroom', label: 'Серверная' },
+  { id: 'assets', label: 'Активы' },
+  { id: 'logistics', label: 'Логистика' },
   { id: 'scorecard', label: 'Разбор' },
   { id: 'history', label: 'История' },
   { id: 'profile', label: 'Профиль' },
@@ -58,6 +62,8 @@ export function Shell() {
         {tool === 'terminal' && <RemoteDesktop />}
         {tool === 'directory' && <DirectoryConsole />}
         {tool === 'serverroom' && <ServerRoom />}
+        {tool === 'assets' && <AssetsView />}
+        {tool === 'logistics' && <LogisticsView />}
         {tool === 'scorecard' && <ScorecardView />}
         {tool === 'history' && <HistoryView />}
         {tool === 'profile' && <ProfileView />}

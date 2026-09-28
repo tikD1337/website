@@ -7,6 +7,7 @@ import {
 import {
   FIELD_QUESTION, FIELD_LABEL, type VerificationField,
 } from '../core/directory/identity'
+import { SHIPMENT_TYPES } from '../core/logistics/types'
 
 const FIELDS = Object.keys(FIELD_QUESTION) as VerificationField[]
 
@@ -41,6 +42,8 @@ export function TicketView() {
   const scenarios = useGame(s => s.scenarios)
   const setTicketStatus = useGame(s => s.setTicketStatus)
   const setTool = useGame(s => s.setTool)
+  const waitForShipment = useGame(s => s.waitForShipment)
+  const [waitError, setWaitError] = useState<string | null>(null)
 
   const ticket = queue.tickets.find(t => t.number === queue.assigned)
   const [draft, setDraft] = useState('')
@@ -50,6 +53,7 @@ export function TicketView() {
 
   useEffect(() => {
     setDraft(ticket?.resolutionNotes ?? '')
+    setWaitError(null)
   }, [ticket?.number])
 
   if (!ticket) {
@@ -62,6 +66,7 @@ export function TicketView() {
   }
 
   const user = world.org.users.find(u => u.samAccountName === ticket.requester)
+  const shipments = world.shipments.filter(x => x.ticket === ticket.number)
   const canResolve = ticket.resolutionCode !== null
   /*
     Показываем только те просьбы, которые техник уже заслужил
@@ -179,6 +184,7 @@ export function TicketView() {
         <select
           aria-label="Рабочий статус"
           value={WORKFLOW_STATUSES.includes(ticket.status as WorkflowStatus)
+            || ticket.status === 'pending-shipment'
             ? ticket.status
             : 'assigned'}
           onChange={e => setTicketStatus(e.target.value as WorkflowStatus)}
@@ -186,8 +192,44 @@ export function TicketView() {
           {WORKFLOW_STATUSES.map(s => (
             <option key={s} value={s}>{STATUS_LABELS[s]}</option>
           ))}
+          {/* Ставится кнопкой: правило «ждать можно только то, что едет» живёт в сторе. */}
+          <option value="pending-shipment" disabled>{STATUS_LABELS['pending-shipment']}</option>
         </select>
+
+        <button
+          className="act"
+          type="button"
+          onClick={() => {
+            const r = waitForShipment()
+            setWaitError(r.ok ? null : r.error ?? null)
+          }}
+        >
+          Ждём поставку
+        </button>
       </div>
+      {waitError && <p className="deny">{waitError}</p>}
+
+      {shipments.length > 0 && (
+        <div className="section">
+          <h2>Отправления по тикету</h2>
+          <table>
+            <thead>
+              <tr><th>Номер</th><th>Тип</th><th>Актив</th><th>Куда</th><th>Этап</th></tr>
+            </thead>
+            <tbody>
+              {shipments.map(x => (
+                <tr key={x.id}>
+                  <td className="data">{x.id}</td>
+                  <td>{SHIPMENT_TYPES[x.type].label}</td>
+                  <td className="data">{x.assetTag}</td>
+                  <td>{x.destination}</td>
+                  <td>{x.history.at(-1)!.stage}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/*
         Просьбы к заявителю.

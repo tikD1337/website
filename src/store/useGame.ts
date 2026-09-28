@@ -68,7 +68,7 @@ import {
 } from '../core/progress/db'
 
 export type Tool =
-  | 'queue' | 'ticket' | 'terminal' | 'directory' | 'serverroom' | 'comms'
+  | 'queue' | 'ticket' | 'terminal' | 'directory' | 'serverroom' | 'assets' | 'logistics' | 'comms'
   | 'settings' | 'scorecard' | 'history' | 'profile'
 
 export interface TerminalLine {
