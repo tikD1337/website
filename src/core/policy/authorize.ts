@@ -40,11 +40,25 @@ export type ActionKind =
   | 'device-change'
   /** правка порта коммутатора; target — `<коммутатор>/<порт>`, порт коротким именем */
   | 'infra-change'
+  /** отправка оборудования; target — тег актива, подробности — в `shipment` */
+  | 'shipment'
+
+/** Всё, что шлюзу нужно знать об отправке, — без поиска по миру. */
+export interface ShipmentFacts {
+  direction: 'to-desk' | 'to-vendor' | 'to-disposal' | 'to-warehouse'
+  /** получатель отправки на стол, иначе '' */
+  recipient: string
+  /** владелец и машина актива — для возврата вендору и утилизации */
+  owner: string
+  attachedTo: string
+  warrantyActive: boolean
+}
 
 export interface Action {
   kind: ActionKind
   target: string
   description: string
+  shipment?: ShipmentFacts
 }
 
 export type Decision = 'allow' | 'deny' | 'flag'
@@ -133,5 +147,35 @@ export function authorize(
 
     case 'infra-change':
       return inTicketScope(world, session, action.target)
+
+    case 'shipment':
+      return shipmentScope(session, action.shipment!)
   }
+}
+
+/**
+ * Отправка оборудования — только по тикету и только заявителю.
+ *
+ * Оборудование уходит на стол того, кто обратился, а возвращается и
+ * утилизируется только его собственное. Утилизация на гарантии — не
+ * запрет, а ошибка суждения: вендор заменил бы бесплатно.
+ */
+function shipmentScope(session: SessionLog, f: ShipmentFacts): AuthResult {
+  const incident = session.incident
+  if (!incident) {
+    return { decision: 'deny', reason: 'нет открытого тикета — отправка оборудования только по тикету' }
+  }
+  if (f.direction === 'to-warehouse') {
+    return { decision: 'deny', reason: 'входящие поставки оформляет закупка' }
+  }
+  if (f.direction === 'to-desk' && f.recipient !== incident.requester) {
+    return { decision: 'deny', reason: 'вне области тикета — оборудование отправляется заявителю' }
+  }
+  if (f.direction !== 'to-desk' && f.owner !== incident.requester && f.attachedTo !== incident.device) {
+    return { decision: 'deny', reason: 'вне области тикета — отправляется только оборудование заявителя' }
+  }
+  if (f.direction === 'to-disposal' && f.warrantyActive) {
+    return { decision: 'flag', reason: 'утилизация оборудования на гарантии — вендор заменит его бесплатно' }
+  }
+  return { decision: 'allow', reason: '' }
 }
