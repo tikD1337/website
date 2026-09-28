@@ -99,4 +99,21 @@ describe('условие сценария', () => {
       anyOf: [{ ...enabled, equals: true }, { path: 'org.нет.такого', contains: 'x', message: '' }],
     })).toBe(true)
   })
+
+  /*
+    Отправление вендору либо оформлено, либо нет; док у машины либо
+    подключён, либо курьер его уже забрал. Для таких вопросов «не нашлось»
+    — законный ответ, а не опечатка. Но только для выбора по полю в конце
+    пути: всё остальное по-прежнему падает громко.
+  */
+  it('exists — единственный предикат, которому можно не найти элемент', () => {
+    const exists = (path: string, want: boolean) => checkHolds(world, { path, exists: want, message: '' })
+    expect(exists('org.users[samAccountName=nobody]', false)).toBe(true)
+    expect(exists('org.users[samAccountName=nobody]', true)).toBe(false)
+    expect(exists('org.users[samAccountName=n.haruna&enabled=true]', true)).toBe(true)
+    expect(() => exists('org.users[samAccountName=n.haruna].enabled', true))
+      .toThrow('exists допустим только для выбора по полю')
+    expect(() => exists('orgs.users[samAccountName=n.haruna]', true))
+      .toThrow('условие ссылается на несуществующий путь')
+  })
 })

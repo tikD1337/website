@@ -1,9 +1,11 @@
 export type PathSegment = string | number
 
-/** Выбор элемента массива по значению поля: `[samAccountName=e.varga]`. */
+/**
+ * Выбор элемента массива по значению полей: `[samAccountName=e.varga]`,
+ * `[attachedTo=AL-LPT-0512&kind=dock]` — все условия сразу.
+ */
 export interface FieldSelector {
-  field: string
-  value: string
+  conds: Array<{ field: string; value: string }>
 }
 
 export type Step = PathSegment | FieldSelector
@@ -55,9 +57,13 @@ export function parsePath(path: string): Step[] {
       if (!/^\d+$/.test(bracket)) throw new Error(`некорректный путь: ${path}`)
       out.push(Number(bracket))
     } else {
-      // Пустое имя поля не совпадёт ни с чем и вернуло бы undefined молча.
-      if (eq === 0) throw new Error(`некорректный путь: ${path}`)
-      out.push({ field: bracket.slice(0, eq), value: bracket.slice(eq + 1) })
+      // Пустое имя поля или пустое условие не совпадут ни с чем и вернули бы undefined молча.
+      const conds = bracket.split('&').map(part => {
+        const i = part.indexOf('=')
+        if (i <= 0) throw new Error(`некорректный путь: ${path}`)
+        return { field: part.slice(0, i), value: part.slice(i + 1) }
+      })
+      out.push({ conds })
     }
     bracket = ''
   }
@@ -100,13 +106,13 @@ export function parsePath(path: string): Step[] {
   return out
 }
 
-/** Ищет элемент массива по значению поля. */
+/** Ищет элемент массива, у которого совпали все поля выбора. */
 function selectFrom(cur: unknown, sel: FieldSelector): unknown {
   if (!Array.isArray(cur)) return undefined
   return cur.find(item =>
     item !== null
     && typeof item === 'object'
-    && String((item as Record<string, unknown>)[sel.field]) === sel.value)
+    && sel.conds.every(c => String((item as Record<string, unknown>)[c.field]) === c.value))
 }
 
 function step(cur: unknown, seg: Step): unknown {

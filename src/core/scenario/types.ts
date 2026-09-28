@@ -28,6 +28,15 @@ export interface SilentFaultCheck {
    * `silentFaultChecks`, а не здесь.
    */
   anyOf?: SilentFaultCheck[]
+  /**
+   * Нашёлся ли элемент по выбору в конце пути:
+   * `shipments[assetTag=AL-P2031&type=vendor-rma]`.
+   *
+   * Единственный предикат, которому «не нашлось» — законный ответ:
+   * отправление либо оформлено, либо нет, док либо подключён, либо курьер
+   * его забрал. Всё остальное на пустом пути падает громко.
+   */
+  exists?: boolean
   message: string
 }
 

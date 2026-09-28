@@ -75,6 +75,22 @@ describe('выбор по значению поля', () => {
       .toThrow(/не существует|не найден/)
   })
 
+  /*
+    Периферия у машины — несколько активов, и «док этой машины» — это два
+    условия сразу: подключён сюда и вид «док». Выбор по одному полю
+    отдавал бы первый попавшийся актив машины — монитор.
+  */
+  it('составной выбор — все условия сразу', () => {
+    const w = { a: [
+      { k: 'dock', h: 'X', c: 'faulty' }, { k: 'mon', h: 'Y', c: 'ok' }, { k: 'dock', h: 'Y', c: 'ok' },
+    ] }
+    expect(getPath(w, 'a[k=dock&h=Y].c')).toBe('ok')
+    expect(getPath(w, 'a[k=dock&h=Z]')).toBeUndefined()
+    for (const bad of ['a[k=dock&]', 'a[&k=dock]', 'a[k=dock&h]']) {
+      expect(() => parsePath(bad), bad).toThrow('некорректный путь')
+    }
+  })
+
   it('значение с дефисами, точками и обратными слешами разбирается целиком', () => {
     const w = { shares: [{ path: '\\\\fileserver.arcline.corp\\Finance-Reports', open: false }] }
     setPath(w, 'shares[path=\\\\fileserver.arcline.corp\\Finance-Reports].open', true)
