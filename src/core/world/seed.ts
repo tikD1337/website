@@ -1,7 +1,7 @@
 import { BRAND } from '../../brand'
 import { DOMAIN, seedOus, seedGroups, seedUsers, seedShares } from './seed-directory'
 import { seedNetwork } from './seed-network'
-import { seedCmdb } from './seed-cmdb'
+import { seedCmdb, seedShipments } from './seed-cmdb'
 import type {
   WorldState, Service, EventEntry, DeviceProcess, Driver, Disk, Adapter, Device,
 } from './types'
@@ -363,6 +363,6 @@ export function seedWorld(): WorldState {
     },
 
     cmdb: seedCmdb(devices, rest, users),
-    shipments: [],
+    shipments: seedShipments(),
   }
 }

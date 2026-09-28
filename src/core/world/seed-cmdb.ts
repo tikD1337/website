@@ -1,5 +1,6 @@
 import { BRAND } from '../../brand'
-import type { Asset, AssetKind, Device, OrgUser, WorldState } from './types'
+import { trackingFor, DISPOSAL_POINT, WAREHOUSE_INBOX } from '../logistics/types'
+import type { Asset, AssetKind, Device, OrgUser, Shipment, WorldState } from './types'
 
 /**
  * Учёт оборудования Arcline.
@@ -104,7 +105,8 @@ export function seedCmdb(
     asset('AL-P5001', 'cable-kit', PERIPHERAL, 'Комплект кабелей USB-C/HDMI', { ...stocked, location: STOCK }),
     asset('AL-L9001', 'laptop', 'Kestrel', 'Meridian 5450', { ...stocked, location: LOANER }),
     asset('AL-L9002', 'laptop', 'Kestrel', 'Meridian 5450', { ...stocked, location: LOANER }),
-    asset('AL-L9003', 'laptop', 'Kestrel', 'Meridian 5450', { ...stocked, location: LOANER }),
+    // Пришёл входящей поставкой SHP-1040 и ещё не разложен по полкам.
+    asset('AL-L9003', 'laptop', 'Kestrel', 'Meridian 5450', { ...stocked, location: WAREHOUSE_INBOX }),
   ]
 
   const retired = [
@@ -126,4 +128,34 @@ export function seedCmdb(
   ]
 
   return [...computers, ...docks, ...monitors, ...headsets, ...phones, ...stock, ...retired, ...serverRoom]
+}
+
+/**
+ * Прошлое логистики: журнал не пуст со старта смены. Истории — литералы
+ * по тем же длительностям, что у живых отправлений.
+ */
+export function seedShipments(): Shipment[] {
+  return [
+    {
+      id: 'SHP-1039', type: 'disposal', direction: 'to-disposal', assetTag: 'AL-L0301',
+      ticket: '', recipient: '', destination: DISPOSAL_POINT,
+      createdAt: '2026-09-20T09:00:00.000Z', stage: 2,
+      history: [
+        { stage: 'Оформлено', at: '2026-09-20T09:00:00.000Z' },
+        { stage: 'Вывезено', at: '2026-09-20T09:00:30.000Z' },
+        { stage: 'Утилизировано', at: '2026-09-20T09:01:30.000Z' },
+      ],
+      tracking: trackingFor(1039), outcome: '',
+    },
+    {
+      id: 'SHP-1040', type: 'inbound', direction: 'to-warehouse', assetTag: 'AL-L9003',
+      ticket: '', recipient: '', destination: WAREHOUSE_INBOX,
+      createdAt: '2026-09-26T08:00:00.000Z', stage: 1,
+      history: [
+        { stage: 'В пути', at: '2026-09-26T08:00:00.000Z' },
+        { stage: 'Принято складом', at: '2026-09-26T08:02:00.000Z' },
+      ],
+      tracking: trackingFor(1040), outcome: '',
+    },
+  ]
 }

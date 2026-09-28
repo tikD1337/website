@@ -118,6 +118,11 @@ describe('стартовый учёт', () => {
       purchased: '2025-03-10', warrantyUntil: '2027-03-10',
       hostname: '', attachedTo: 'AL-LPT-0512', condition: 'ok', note: '',
     })
+    // Журнал логистики не пуст со старта: прошлые утилизация и входящая поставка.
+    expect(w.shipments.map(s => [s.id, s.type, s.assetTag, s.history.at(-1)!.stage])).toEqual([
+      ['SHP-1039', 'disposal', 'AL-L0301', 'Утилизировано'],
+      ['SHP-1040', 'inbound', 'AL-L9003', 'Принято складом'],
+    ])
   })
 })
 
