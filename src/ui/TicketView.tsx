@@ -209,6 +209,19 @@ export function TicketView() {
       </div>
       {waitError && <p className="deny">{waitError}</p>}
 
+      {/*
+        Рабочие заметки — то, что происходило с тикетом без техника:
+        доставка по отправлению. Найдено на снимке: заметка писалась, но
+        видно её не было нигде, и вернувшийся к тикету не знал, что
+        замена уже на столе.
+      */}
+      {ticket.workNotes && (
+        <div className="section">
+          <h2>Рабочие заметки</h2>
+          <p className="prose work-notes">{ticket.workNotes}</p>
+        </div>
+      )}
+
       {shipments.length > 0 && (
         <div className="section">
           <h2>Отправления по тикету</h2>

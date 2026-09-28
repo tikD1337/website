@@ -89,7 +89,8 @@ export function LogisticsView() {
               </option>
             ))}
           </datalist>
-          {toDesk && (
+          {/* Без тикета получателя нет: отправка по заявке, а не кому угодно. */}
+          {toDesk && ticket && (
             <select aria-label="Получатель" value={recipient || ticket?.requester || ''} onChange={e => setRecipient(e.target.value)}>
               {world.org.users.filter(u => u.office).map(u => (
                 <option key={u.samAccountName} value={u.samAccountName}>{u.displayName}, стол {u.office}</option>
@@ -112,7 +113,7 @@ export function LogisticsView() {
 
       <div className="section">
         <h2>Журнал отправлений</h2>
-        <table>
+        <table className="journal">
           <thead>
             <tr><th>Номер</th><th>Тип</th><th>Актив</th><th>Куда</th><th>Тикет</th><th>Этап</th><th>До следующего</th></tr>
           </thead>

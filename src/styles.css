@@ -824,6 +824,13 @@ tr.sel td { background: #232c38; }
 
 .term.switch-term input { min-width: 20ch; }
 
+/* ── логистика ───────────────────────────────────────────── */
+
+/* Тег и номер отслеживания — одно слово: перенос посередине («AL-/P2040») найден на снимке. */
+table.journal td.data { white-space: nowrap; }
+
+.work-notes { white-space: pre-line; }
+
 /* ── панель задач ────────────────────────────────────────── */
 
 .taskbar {
