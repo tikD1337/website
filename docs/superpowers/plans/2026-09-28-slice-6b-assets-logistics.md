@@ -237,3 +237,17 @@
 - `pnputil /enum-devices /problem` и `Get-PnpDevice` не реализованы —
   диспетчер устройств закрывает оба сценария; кандидаты в срез контента.
 - Длительности этапов — наша оценка: разведка оригинала их не сняла.
+
+## Решения исполнителя
+
+Всё, что решено по ходу вместо плана, — с ценой ошибки. Обзор ветки:
+отдельный агент дефектов не нашёл; оба сценария пройдены в браузере.
+
+- Task 1: Ruling: check tests use the file's local world (org.users selectors) instead of devices paths named in the plan — same behaviours, the test file has no WorldState — cost if wrong: none
+- Task 2: Ruling: Shipment gets `recipient` (samAccountName) beyond the spec's interface — delivery needs the recipient's desk and machine, and the plan's ShipmentInput already carries it — cost if wrong: one field
+- Task 2: Ruling: shipment history seed moved to Task 3 (plan's T2 test listed shipments) — T3 owns the Shipment logic — cost if wrong: none
+- Task 2: Ruling: server assets vendor/model 'Kestrel PowerLine R650' (Server type has no model) — cost if wrong: cosmetic
+- Task 3: Ruling: AL-L9003 seeded at 'Склад, стеллаж A1' (inbound acceptance location) instead of loaner shelf — matches its SHP-1040 history — cost if wrong: cosmetic
+- Task 4: Ruling: accounting checks (exists, kind, lifecycle) run before the gate; recipient lookup after it — a double click or an orphan session must not produce the wrong message or a dangerous action — cost if wrong: order of messages
+- Task 6: Ruling: openApp records `app:<id>` only with an assigned ticket (the session without one is the closed incident's) — cost if wrong: none
+- Task 7: Ruling: store tests keep the dock stub instead of the real scenario (plan said switch) — store tests own wiring, not scenario content; e2e covers the real one — cost if wrong: none
