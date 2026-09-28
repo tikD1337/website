@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { createQueue, claim, setStatus, resolve, unassign, findTicket } from './queue'
+import { createQueue, claim, setStatus, resolve, unassign, findTicket, park, resume } from './queue'
 import type { QueueState } from './queue'
 import type { Ticket } from './types'
 
@@ -81,5 +81,28 @@ describe('очередь', () => {
     unassign(q, SECOND)
     expect(q.assigned).toBeNull()
     expect(findTicket(q, SECOND).status).toBe('new')
+  })
+
+  /*
+    Пока курьер везёт замену, техник берёт следующий тикет: «Ждём
+    поставку» отпускает слот, но статус тикета не теряется при повторном
+    взятии — иначе «ждём» превращалось бы в «назначен» от клика по строке.
+  */
+  it('ждущий тикет отпускает слот и возвращается со своим статусом', () => {
+    expect(() => park(q, FIRST)).toThrow('тикет не назначен на вас')
+    claim(q, FIRST, clock)
+    park(q, FIRST)
+    expect(q.assigned).toBeNull()
+    expect(findTicket(q, FIRST).status).toBe('pending-shipment')
+
+    claim(q, SECOND, clock)
+    resolve(q, SECOND, 'solved')
+    claim(q, FIRST, clock)
+    expect(findTicket(q, FIRST).status).toBe('pending-shipment')
+
+    resume(q, FIRST)
+    expect(findTicket(q, FIRST).status).toBe('in-progress')
+    resume(q, SECOND)
+    expect(findTicket(q, SECOND).status).toBe('completed')
   })
 })
