@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { searchKb, relatedTo } from './search'
+import { searchKb, relatedTo, mergeKb } from './search'
 import type { KbArticle } from './types'
 
 function article(id: string, over: Partial<KbArticle>): KbArticle {
@@ -29,5 +29,28 @@ describe('поиск по базе', () => {
     expect(ids(relatedTo(KB, { scenarioId: 'net-wrong-vlan-port', subcategory: 'Связность' })))
       .toEqual(['KB-0002', 'KB-0001'])
     expect(ids(relatedTo(KB, { scenarioId: 'hw-dock-failed', subcategory: 'Периферия' }))).toEqual([])
+  })
+
+  /*
+    Черновик может появиться раньше, чем хранилище отдаст загруженное:
+    закрытие не ждёт гидратации. Слияние обязано не повторить номер и не
+    раздвоить одну проблему.
+  */
+  it('гидратация: загруженное первым, та же проблема сливает источники, остальные — следующие номера', () => {
+    const loaded = [
+      article('KB-0001', { scenarioId: 'net-apipa-no-lease', sources: ['SH-1:A'] }),
+      article('KB-0002', { scenarioId: 'print-spooler-stopped', sources: ['SH-1:B'] }),
+    ]
+    const inMemory = [
+      article('KB-0001', { scenarioId: 'net-apipa-no-lease', sources: ['SH-9:X'] }),
+      article('KB-0002', { scenarioId: 'identity-account-lockout', sources: ['SH-9:Y'] }),
+    ]
+    const merged = mergeKb(loaded, inMemory)
+    expect(merged.map(a => [a.id, a.scenarioId, a.sources])).toEqual([
+      ['KB-0001', 'net-apipa-no-lease', ['SH-1:A', 'SH-9:X']],
+      ['KB-0002', 'print-spooler-stopped', ['SH-1:B']],
+      ['KB-0003', 'identity-account-lockout', ['SH-9:Y']],
+    ])
+    expect(loaded[0]!.sources).toEqual(['SH-1:A'])
   })
 })

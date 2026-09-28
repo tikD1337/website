@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { validateProgress } from './validate'
+import { validateProgress, normalizeProgress } from './validate'
 import type { Progress, TicketRecord } from './types'
 
 function rec(over: Partial<TicketRecord> = {}): TicketRecord {
@@ -17,7 +17,7 @@ function rec(over: Partial<TicketRecord> = {}): TicketRecord {
 }
 
 function progress(records: TicketRecord[]): Progress {
-  return { version: 1, records }
+  return { version: 1, records, kb: [] }
 }
 
 const codes = (raw: unknown) => validateProgress(raw as never).map(e => e.code)
@@ -61,5 +61,22 @@ describe('разбор прочитанного из хранилища', () => 
       expect(() => validateProgress(raw as never), JSON.stringify(raw)).not.toThrow()
       expect(codes(raw).length, JSON.stringify(raw)).toBeGreaterThan(0)
     }
+  })
+
+  it('прогресс прошлого формата без статей читается; битая статья — ошибка', () => {
+    const old = { version: 1, records: [rec()] }
+    expect(validateProgress(old)).toEqual([])
+    expect(normalizeProgress(old as Progress)).toEqual({ ...old, kb: [] })
+
+    const article = {
+      id: 'KB-0001', scenarioId: 's', title: 'Нет сети', type: 'network', body: 'текст',
+      status: 'draft', version: 1, category: '', subcategory: '', resolutionCode: 'solved',
+      createdAt: '', updatedAt: '', sources: [], history: [],
+    }
+    expect(codes({ ...old, kb: [article] })).toEqual([])
+    expect(codes({ ...old, kb: 'x' })).toEqual(['bad_kb'])
+    expect(codes({ ...old, kb: [{ ...article, title: '' }] })).toEqual(['bad_article'])
+    expect(codes({ ...old, kb: [{ ...article, status: 'lost' }] })).toEqual(['bad_article'])
+    expect(codes({ ...old, kb: [null] })).toEqual(['bad_article'])
   })
 })

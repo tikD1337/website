@@ -1,4 +1,4 @@
-import type { TicketRecord } from './types'
+import type { Progress, TicketRecord } from './types'
 
 export interface ValidationError {
   code: string
@@ -29,7 +29,7 @@ export function validateProgress(raw: unknown): ValidationError[] {
     return [{ code: 'bad_shape', message: 'прочитано не похоже на прогресс' }]
   }
 
-  const progress = raw as { version?: unknown; records?: unknown }
+  const progress = raw as { version?: unknown; records?: unknown; kb?: unknown }
 
   if (progress.version !== 1) {
     errors.push({
@@ -74,5 +74,42 @@ export function validateProgress(raw: unknown): ValidationError[] {
     }
   }
 
+  /*
+    База знаний (срез 6В). Её отсутствие — прошлый формат, а не порча:
+    `normalizeProgress` достроит пустой список. Присутствие — проверяется
+    так же строго, как история.
+  */
+  if (progress.kb !== undefined) {
+    if (!Array.isArray(progress.kb)) {
+      errors.push({ code: 'bad_kb', message: 'база знаний не массив' })
+    } else {
+      for (const entry of progress.kb) {
+        if (!isArticle(entry)) errors.push({ code: 'bad_article', message: 'испорченная статья базы знаний' })
+      }
+    }
+  }
+
   return errors
 }
+
+const KB_TYPES = ['sop', 'runbook', 'network', 'ad', 'known-issue', 'vendor', 'diagnostics']
+const KB_STATUSES = ['draft', 'published', 'retired']
+
+function isArticle(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null) return false
+  const a = raw as Record<string, unknown>
+  return typeof a['id'] === 'string' && a['id'] !== ''
+    && typeof a['scenarioId'] === 'string' && a['scenarioId'] !== ''
+    && typeof a['title'] === 'string' && a['title'] !== ''
+    && typeof a['body'] === 'string'
+    && KB_TYPES.includes(a['type'] as string)
+    && KB_STATUSES.includes(a['status'] as string)
+    && typeof a['version'] === 'number' && a['version'] >= 1
+    && Array.isArray(a['sources']) && Array.isArray(a['history'])
+}
+
+/** Проверенный прогресс прошлого формата получает пустую базу знаний. */
+export function normalizeProgress(p: Progress): Progress {
+  return { ...p, kb: Array.isArray(p.kb) ? p.kb : [] }
+}
+

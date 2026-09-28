@@ -1,4 +1,5 @@
 import type { Scorecard } from '../grading/grade'
+import type { KbArticle } from '../kb/types'
 import type { ResolutionCode } from '../tickets/types'
 
 /**
@@ -54,8 +55,13 @@ export interface Progress {
   /** версия схемы: следующая не станет молча читать чужое */
   version: 1
   records: TicketRecord[]
+  /**
+   * База знаний — заработана игроком, как и история. Поле добавочное:
+   * прогресс прошлого формата без него читается как «статей нет».
+   */
+  kb: KbArticle[]
 }
 
 export function emptyProgress(): Progress {
-  return { version: 1, records: [] }
+  return { version: 1, records: [], kb: [] }
 }

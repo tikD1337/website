@@ -1,5 +1,5 @@
 import type { Progress } from './types'
-import { validateProgress } from './validate'
+import { validateProgress, normalizeProgress } from './validate'
 import { emptyProgress } from './types'
 
 /**
@@ -76,7 +76,7 @@ export async function loadProgress(): Promise<Progress> {
           }
           const errors = validateProgress(raw)
           // Мусор в хранилище — сбрасываем молча, как в dialogue.
-          resolve(errors.length === 0 ? (raw as Progress) : emptyProgress())
+          resolve(errors.length === 0 ? normalizeProgress(raw as Progress) : emptyProgress())
         } catch {
           resolve(emptyProgress())
         }
