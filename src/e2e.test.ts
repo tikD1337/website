@@ -3,6 +3,7 @@ import { createGameStore } from './store/useGame'
 import { hasShareAccess } from './core/directory/accounts'
 import { defaultConfig } from './core/dialogue/types'
 import { SCENARIOS } from './scenarios'
+import { relatedTo } from './core/kb/search'
 import type { FetchLike } from './core/dialogue/openai'
 
 /**
@@ -640,5 +641,31 @@ describe('изношенная гарнитура', () => {
     const card = close(s, NOTE)
     expect(card.silentFaults).toEqual([expect.stringContaining('запасом')])
     expect(card.verdict).toBe('fail')
+  })
+})
+
+/*
+  База знаний зарабатывается: заметка закрытого тикета становится
+  черновиком, и через смену тот же сценарий приходит со своей статьёй.
+*/
+describe('база знаний', () => {
+  it('своя статья возвращается с повтором проблемы и копит источники', () => {
+    const s = play('net-apipa-no-lease', '2026-09-28T10:00:00.000Z')
+    s().runCommand('ipconfig /release')
+    s().runCommand('ipconfig /renew')
+    s().confirmWithUser()
+    close(s, 'Не открывались сайты: самоназначенный адрес. ipconfig /release и /renew выдали 10.20.14.88.')
+    expect(s().progress.kb).toMatchObject([{ id: 'KB-0001', type: 'network', status: 'draft', version: 1 }])
+
+    s().reset()
+    const again = s().queue.tickets.find(t => t.scenarioId === 'net-apipa-no-lease')!
+    expect(relatedTo(s().progress.kb, again).map(a => a.id)).toEqual(['KB-0001'])
+    s().claimTicket(again.number)
+    s().runCommand('ipconfig /release')
+    s().runCommand('ipconfig /renew')
+    close(s, 'Повтор: тот же самоназначенный адрес, release и renew.')
+    expect(s().progress.kb).toHaveLength(1)
+    expect(s().progress.kb[0]).toMatchObject({ version: 1 })
+    expect(s().progress.kb[0]!.sources).toHaveLength(2)
   })
 })

@@ -9,6 +9,10 @@ import {
 import { createShipment as ship, type ShipmentInput, type ShipResult } from '../core/logistics/ship'
 import { advanceShipments } from '../core/logistics/advance'
 import { STAGES } from '../core/logistics/types'
+import { draftFrom } from '../core/kb/draft'
+import { editArticle as editKb, setStatus as setKbStatus, type KbResult } from '../core/kb/edit'
+import { mergeKb } from '../core/kb/search'
+import type { KbArticle, KbStatus, KbType } from '../core/kb/types'
 import {
   createQueueGenerator, fillQueue, SHIFT_WINDOW,
 } from '../core/tickets/generate'
@@ -68,7 +72,7 @@ import {
 } from '../core/progress/db'
 
 export type Tool =
-  | 'queue' | 'ticket' | 'terminal' | 'directory' | 'serverroom' | 'assets' | 'logistics' | 'comms'
+  | 'queue' | 'ticket' | 'terminal' | 'directory' | 'serverroom' | 'assets' | 'logistics' | 'kb' | 'comms'
   | 'settings' | 'scorecard' | 'history' | 'profile'
 
 export interface TerminalLine {
@@ -112,6 +116,10 @@ export interface GameState {
   consoles: Record<string, SwitchConsole>
   /** инциденты тикетов «Ждём поставку», по номеру тикета */
   parked: Record<string, ParkedIncident>
+  /** что сделало последнее закрытие с базой знаний — для строки в разборе */
+  lastDraft: { id: string; created: boolean } | null
+  /** статья, открытая в «Документации» */
+  kbOpen: string | null
   scorecard: Scorecard | null
   /** сценарий закрытого тикета — разбор показывает его корневую причину */
   scoredScenarioId: string | null
@@ -210,6 +218,12 @@ export interface GameState {
   createShipment(input: ShipmentInput): ShipResult
   /** «Ждём поставку»: отпустить слот, запарковать инцидент. */
   waitForShipment(): { ok: boolean; error?: string }
+
+  /** Правка статьи базы знаний — новая версия. */
+  editArticle(id: string, patch: { title?: string; type?: KbType; body?: string }): KbResult
+  setArticleStatus(id: string, status: KbStatus): KbResult
+  /** Открыть статью в «Документации»; при взятом тикете — отметить осмотренной. */
+  openArticle(id: string): void
 
   /** Открыть сеанс консоли коммутатора, если он ещё не открыт. */
   openConsole(device: string): void
@@ -331,6 +345,8 @@ export function createGameStore(
       terminalLines: banner(),
       consoles: {},
       parked: {},
+      lastDraft: null,
+      kbOpen: null,
       scorecard: null,
       scoredScenarioId: null,
       windows: createWindows(),
@@ -375,9 +391,14 @@ export function createGameStore(
     const merge = (loaded: Progress) => {
       progressLoaded = true
       progressPromise = null
-      const inMemory = get().progress.records
+      const inMemory = get().progress
       set({
-        progress: { ...loaded, records: [...loaded.records, ...inMemory] },
+        progress: {
+          ...loaded,
+          records: [...loaded.records, ...inMemory.records],
+          // Черновик мог появиться до конца загрузки: слияние не повторит номер.
+          kb: mergeKb(loaded.kb, inMemory.kb),
+        },
         progressLoaded: true,
       })
     }
@@ -417,6 +438,16 @@ export function createGameStore(
       const r = run(st.world, st.session)
       set({ world: { ...st.world }, session: { ...st.session } })
       return r
+    }
+
+    /** Статья правится в памяти сразу, хранилище получает её следом. */
+    const commitArticle = (article: KbArticle) => {
+      const st = get()
+      const progress = { ...st.progress, kb: st.progress.kb.map(x => (x.id === article.id ? article : x)) }
+      set({ progress })
+      void saveProgress(progress).catch(() => {
+        // Хранилище недоступно — база живёт в памяти до перезагрузки.
+      })
     }
 
     return {
@@ -493,6 +524,7 @@ export function createGameStore(
           windows: createWindows(),
         }),
         parked: restParked,
+        lastDraft: null,
         channel: 'call',
         talkingTo: null,
         waitingReply: false,
@@ -1165,6 +1197,37 @@ export function createGameStore(
       return { ok: true }
     },
 
+    editArticle(id, patch) {
+      const a = get().progress.kb.find(x => x.id === id)
+      if (!a) return { ok: false, error: `статья ${id} не найдена` }
+      const r = editKb(a, patch, clock.now().toISOString())
+      if (r.ok && r.article !== a) commitArticle(r.article)
+      return r
+    },
+
+    setArticleStatus(id, status) {
+      const a = get().progress.kb.find(x => x.id === id)
+      if (!a) return { ok: false, error: `статья ${id} не найдена` }
+      const r = setKbStatus(a, status, clock.now().toISOString())
+      if (r.ok) commitArticle(r.article)
+      return r
+    },
+
+    openArticle(id) {
+      const st = get()
+      /*
+        Заглянуть в базу — законный приём, и разбор это покажет. Без
+        взятого тикета журнал принадлежит закрытому инциденту — писать в
+        него нельзя.
+      */
+      const key = `kb:${id.toLowerCase()}`
+      if (st.queue.assigned && !st.session.inspected.includes(key)) {
+        st.session.inspected.push(key)
+        set({ session: { ...st.session } })
+      }
+      set({ kbOpen: id, activeTool: 'kb' })
+    },
+
     checkShareAccess(sam, sharePath) {
       return hasShareAccess(get().world, sam, sharePath)
     },
@@ -1217,9 +1280,16 @@ export function createGameStore(
         shiftId: st.shiftId,
         clock,
       })
+      /*
+        Заметка закрытого тикета становится черновиком статьи — в том же
+        `set`, что и запись прохождения: база знаний — часть прогресса и
+        живёт по его правилу «сначала память, потом хранилище».
+      */
+      const draft = draftFrom(st.progress.kb, record)
       const progress = {
         ...st.progress,
         records: [...st.progress.records, record],
+        kb: draft.kb,
       }
 
       set({
@@ -1230,6 +1300,7 @@ export function createGameStore(
         scoredScenarioId: ticket.scenarioId,
         activeTool: 'scorecard',
         progress,
+        lastDraft: draft.id ? { id: draft.id, created: draft.created } : null,
         shiftExhausted: generator.exhausted,
         // Свой разбор вытесняет чужой: иначе экран покажет прошлое.
         viewing: null,

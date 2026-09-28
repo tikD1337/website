@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createGameStore } from './useGame'
+import { saveProgress } from '../core/progress/db'
+
+// Хранилище настоящее, кроме записи: её нужно видеть, а не выполнять.
+vi.mock('../core/progress/db', async (original) => ({
+  ...(await original<typeof import('../core/progress/db')>()),
+  saveProgress: vi.fn(async () => {}),
+}))
 import { apipaNoLease } from '../scenarios/net-apipa-no-lease'
 import { SCENARIOS } from '../scenarios'
 import { HANDOFF_REPLY } from '../core/dialogue/scripted'
@@ -501,5 +508,41 @@ describe('логистика', () => {
     s().openApp('devmgmt')
     s().inspectObject('asset', 'AL-P2031')
     expect(s().session.inspected).toEqual(['app:devmgmt', 'asset:al-p2031'])
+  })
+})
+
+describe('база знаний', () => {
+  /*
+    Состояние правится синхронно, хранилище получает его следом — правило
+    среза 5. Черновик обязан быть в прогрессе в тот же миг, что и запись
+    прохождения, а правка — уйти в хранилище актуальной версией.
+  */
+  it('закрытие даёт черновик сразу; правка и публикация сохраняются', () => {
+    s().claimTicket(firstNumber())
+    close('Не открывались сайты. ipconfig /release и /renew выдали адрес.')
+    expect(s().progress.kb.map(a => [a.id, a.status, a.version])).toEqual([['KB-0001', 'draft', 1]])
+    expect(s().lastDraft).toEqual({ id: 'KB-0001', created: true })
+
+    expect(s().editArticle('KB-0001', { body: 'Сначала release, потом renew.' })).toMatchObject({ ok: true })
+    expect(s().setArticleStatus('KB-0001', 'published')).toMatchObject({ ok: true })
+    expect(s().progress.kb[0]).toMatchObject({ version: 2, status: 'published', body: 'Сначала release, потом renew.' })
+    expect(vi.mocked(saveProgress).mock.calls.at(-1)![0].kb[0]).toMatchObject({ version: 2, status: 'published' })
+
+    expect(s().editArticle('KB-9999', { body: 'x' })).toEqual({ ok: false, error: 'статья KB-9999 не найдена' })
+    s().claimTicket(nextOpen().number)
+    expect(s().lastDraft).toBeNull()
+  })
+
+  /* Журнал без взятого тикета — журнал закрытого инцидента: писать в него нельзя. */
+  it('открытая статья — в осмотренном только при взятом тикете', () => {
+    s().claimTicket(firstNumber())
+    close('Заметка о решении.')
+    s().openArticle('KB-0001')
+    expect(s()).toMatchObject({ kbOpen: 'KB-0001', activeTool: 'kb' })
+    expect(s().session.inspected).not.toContain('kb:kb-0001')
+
+    s().claimTicket(nextOpen().number)
+    s().openArticle('KB-0001')
+    expect(s().session.inspected).toContain('kb:kb-0001')
   })
 })
