@@ -1,4 +1,5 @@
 import { joinLines } from '../format'
+import { linkOf, segmentOf } from '../../network/link'
 import type { CommandHandler, CommandContext } from '../types'
 
 /**
@@ -11,14 +12,13 @@ import type { CommandHandler, CommandContext } from '../types'
 function hasRoute(ctx: CommandContext): boolean {
   const a = ctx.world.devices[ctx.device]?.adapters[0]
   if (!a) return false
-  return a.linkUp && !a.autoconfigured && a.gateway !== '' && a.ip !== '0.0.0.0'
+  return linkOf(ctx.world, ctx.device)
+    && !a.autoconfigured && a.gateway !== '' && a.ip !== '0.0.0.0'
 }
 
 /** Адрес в той же подсети, что и машина: пингуется без шлюза. */
 function isLocalSubnet(ctx: CommandContext, target: string): boolean {
-  const a = ctx.world.devices[ctx.device]?.adapters[0]
-  if (!a) return false
-  const seg = ctx.world.network.segments.find(s => s.vlan === a.segment)
+  const seg = segmentOf(ctx.world, ctx.device)
   if (!seg) return false
   const prefix = seg.subnet.split('/')[0]!.split('.').slice(0, 3).join('.')
   return target.startsWith(`${prefix}.`)

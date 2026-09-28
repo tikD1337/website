@@ -12,6 +12,8 @@ export type TicketStatus =
   | 'assigned'
   | 'in-progress'
   | 'pending-user'
+  /** ждёт отправление на стол; отпускает слот «одного тикета в работе» */
+  | 'pending-shipment'
   | 'completed'
 
 /** Статусы, которые техник выставляет руками. `completed` сюда не входит. */
@@ -36,6 +38,7 @@ export const STATUS_LABELS: Record<TicketStatus, string> = {
   assigned: 'Назначен',
   'in-progress': 'В работе',
   'pending-user': 'Ждём пользователя',
+  'pending-shipment': 'Ждём поставку',
   completed: 'Завершён',
 }
 

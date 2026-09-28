@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { createQueue, claim, setStatus, resolve, unassign, findTicket } from './queue'
+import { createQueue, claim, setStatus, resolve, unassign, findTicket, park, resume } from './queue'
 import type { QueueState } from './queue'
 import type { Ticket } from './types'
 
@@ -37,110 +37,72 @@ beforeEach(() => {
   q = createQueue([makeTicket(FIRST), makeTicket(SECOND)])
 })
 
-describe('claim', () => {
-  it('переводит тикет в назначенный и запоминает его', () => {
+/*
+  Один тикет в работе за раз — правило снято с ориентира и держится
+  намеренно: оно заставляет доводить дело до конца. Рабочий статус
+  тикет не закрывает — закрытие отдельное действие с кодом.
+*/
+describe('очередь', () => {
+  it('взятие назначает тикет и запоминает время первого взятия', () => {
     claim(q, FIRST, clock)
     expect(q.assigned).toBe(FIRST)
-    expect(findTicket(q, FIRST).status).toBe('assigned')
-  })
+    expect(findTicket(q, FIRST)).toMatchObject({
+      status: 'assigned', createdAt: '2026-09-09T18:00:00.000Z',
+    })
 
-  it('проставляет время первого взятия', () => {
-    claim(q, FIRST, clock)
+    claim(q, FIRST, { now: () => new Date('2026-09-09T19:00:00.000Z') })
     expect(findTicket(q, FIRST).createdAt).toBe('2026-09-09T18:00:00.000Z')
   })
 
-  it('повторное взятие не перезаписывает время', () => {
-    claim(q, FIRST, clock)
-    const later = { now: () => new Date('2026-09-09T19:00:00.000Z') }
-    claim(q, FIRST, later)
-    expect(findTicket(q, FIRST).createdAt).toBe('2026-09-09T18:00:00.000Z')
-  })
-
-  it('отказывает, если уже есть тикет в работе', () => {
+  it('второй тикет, закрытый и несуществующий взять нельзя', () => {
     claim(q, FIRST, clock)
     expect(() => claim(q, SECOND, clock)).toThrow('сначала завершите текущий тикет')
-  })
-
-  it('нельзя взять закрытый тикет', () => {
-    claim(q, FIRST, clock)
     resolve(q, FIRST, 'solved')
     expect(() => claim(q, FIRST, clock)).toThrow('тикет уже закрыт')
-  })
-
-  it('несуществующий номер отвергается', () => {
     expect(() => claim(q, 'INC9999999', clock)).toThrow('тикет не найден')
   })
-})
 
-describe('setStatus', () => {
-  it('меняет рабочий статус', () => {
-    claim(q, FIRST, clock)
-    setStatus(q, FIRST, 'in-progress')
-    expect(findTicket(q, FIRST).status).toBe('in-progress')
-  })
-
-  it('не позволяет менять статус невзятого тикета', () => {
+  it('рабочий статус меняется только у своего тикета и его не закрывает', () => {
     expect(() => setStatus(q, FIRST, 'in-progress')).toThrow('тикет не назначен на вас')
-  })
-
-  it('рабочий статус не закрывает тикет', () => {
     claim(q, FIRST, clock)
     setStatus(q, FIRST, 'pending-user')
-    expect(findTicket(q, FIRST).status).not.toBe('completed')
+    expect(findTicket(q, FIRST).status).toBe('pending-user')
     expect(q.assigned).toBe(FIRST)
   })
-})
 
-describe('resolve', () => {
-  it('закрывает тикет с кодом и освобождает слот', () => {
-    claim(q, FIRST, clock)
-    resolve(q, FIRST, 'solved')
-    const t = findTicket(q, FIRST)
-    expect(t.status).toBe('completed')
-    expect(t.resolutionCode).toBe('solved')
-    expect(q.assigned).toBeNull()
-  })
-
-  it('после закрытия можно взять следующий', () => {
-    claim(q, FIRST, clock)
-    resolve(q, FIRST, 'solved')
-    claim(q, SECOND, clock)
-    expect(q.assigned).toBe(SECOND)
-  })
-
-  it('нельзя закрыть невзятый тикет', () => {
+  it('закрытие с кодом освобождает слот; возврат в очередь тоже', () => {
     expect(() => resolve(q, FIRST, 'solved')).toThrow('тикет не назначен на вас')
-  })
-
-  it('эскалация закрывает так же, как решение', () => {
     claim(q, FIRST, clock)
     resolve(q, FIRST, 'escalate')
-    expect(findTicket(q, FIRST).resolutionCode).toBe('escalate')
+    expect(findTicket(q, FIRST)).toMatchObject({ status: 'completed', resolutionCode: 'escalate' })
     expect(q.assigned).toBeNull()
-  })
-})
 
-describe('unassign', () => {
-  it('возвращает тикет в очередь', () => {
-    claim(q, FIRST, clock)
-    unassign(q, FIRST)
-    expect(q.assigned).toBeNull()
-    expect(findTicket(q, FIRST).status).toBe('new')
-  })
-
-  it('после возврата можно взять другой', () => {
-    claim(q, FIRST, clock)
-    unassign(q, FIRST)
     claim(q, SECOND, clock)
-    expect(q.assigned).toBe(SECOND)
+    unassign(q, SECOND)
+    expect(q.assigned).toBeNull()
+    expect(findTicket(q, SECOND).status).toBe('new')
   })
-})
 
-describe('счётчики очереди', () => {
-  it('различают открытые, назначенные и закрытые', () => {
+  /*
+    Пока курьер везёт замену, техник берёт следующий тикет: «Ждём
+    поставку» отпускает слот, но статус тикета не теряется при повторном
+    взятии — иначе «ждём» превращалось бы в «назначен» от клика по строке.
+  */
+  it('ждущий тикет отпускает слот и возвращается со своим статусом', () => {
+    expect(() => park(q, FIRST)).toThrow('тикет не назначен на вас')
     claim(q, FIRST, clock)
-    resolve(q, FIRST, 'solved')
-    expect(q.tickets.filter(t => t.status === 'completed')).toHaveLength(1)
-    expect(q.tickets.filter(t => t.status === 'new')).toHaveLength(1)
+    park(q, FIRST)
+    expect(q.assigned).toBeNull()
+    expect(findTicket(q, FIRST).status).toBe('pending-shipment')
+
+    claim(q, SECOND, clock)
+    resolve(q, SECOND, 'solved')
+    claim(q, FIRST, clock)
+    expect(findTicket(q, FIRST).status).toBe('pending-shipment')
+
+    resume(q, FIRST)
+    expect(findTicket(q, FIRST).status).toBe('in-progress')
+    resume(q, SECOND)
+    expect(findTicket(q, SECOND).status).toBe('completed')
   })
 })

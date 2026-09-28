@@ -27,5 +27,8 @@ screensaver/
 AfterDark-*.exe
 AfterDark-*.zip
 
-# артефакт инкрементальной сборки tsc -b
+# Р°СЂС‚РµС„Р°РєС‚ РёРЅРєСЂРµРјРµРЅС‚Р°Р»СЊРЅРѕР№ СЃР±РѕСЂРєРё tsc -b
 tsconfig.tsbuildinfo
+
+# РєСЌС€ wrangler
+.wrangler/

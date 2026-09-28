@@ -63,7 +63,7 @@ export const identityAccountLockout: Scenario = {
           at: '2026-09-10T06:14:03.000Z',
           log: 'Security',
           level: 'information',
-          source: 'Microsoft-Windows-Security-Auditing',
+          source: 'Vantage-Windows-Security-Auditing',
           eventId: 4771,
           message:
             'Kerberos pre-authentication failed. Account Name: e.varga. '
@@ -73,7 +73,7 @@ export const identityAccountLockout: Scenario = {
           at: '2026-09-10T06:19:07.000Z',
           log: 'Security',
           level: 'information',
-          source: 'Microsoft-Windows-Security-Auditing',
+          source: 'Vantage-Windows-Security-Auditing',
           eventId: 4771,
           message:
             'Kerberos pre-authentication failed. Account Name: e.varga. '
@@ -83,7 +83,7 @@ export const identityAccountLockout: Scenario = {
           at: '2026-09-10T06:24:11.000Z',
           log: 'Security',
           level: 'information',
-          source: 'Microsoft-Windows-Security-Auditing',
+          source: 'Vantage-Windows-Security-Auditing',
           eventId: 4771,
           message:
             'Kerberos pre-authentication failed. Account Name: e.varga. '
@@ -93,7 +93,7 @@ export const identityAccountLockout: Scenario = {
           at: '2026-09-10T06:24:12.000Z',
           log: 'Security',
           level: 'information',
-          source: 'Microsoft-Windows-Security-Auditing',
+          source: 'Vantage-Windows-Security-Auditing',
           eventId: 4740,
           message:
             'A user account was locked out. Account Name: e.varga. '

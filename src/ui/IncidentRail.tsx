@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useGame } from '../store/useGame'
 import { STATUS_LABELS } from '../core/tickets/types'
 import { withPlural } from './plural'
+import { networkObserved } from '../core/session/observed'
 
 /**
  * Значение, которое подсвечивается один раз, когда изменилось.
@@ -47,8 +48,12 @@ export function IncidentRail() {
   }
 
   const user = world.org.users.find(u => u.samAccountName === ticket.requester)
-  const adapter = world.devices[ticket.device]?.adapters[0]
+  const machine = world.devices[ticket.device]
+  const adapter = machine?.adapters[0]
   const flags = session.flags
+  // Сеть в карточке — после того, как техник её посмотрел: адрес 169.254
+  // под номером тикета решал развилку сценария без единой команды.
+  const netSeen = networkObserved(session, ticket.device)
 
   return (
     <aside className="rail" aria-label="Текущий инцидент">
@@ -85,15 +90,26 @@ export function IncidentRail() {
         <dl className="kv">
           <dt>Имя</dt>
           <Data value={ticket.device} />
-          <dt>Адрес</dt>
-          <Data value={adapter?.ip ?? '—'} />
-          <dt>Маска</dt>
-          <Data value={adapter?.mask ?? '—'} />
-          <dt>Шлюз</dt>
-          <Data value={adapter?.gateway || '—'} />
-          <dt>DNS</dt>
-          <Data value={adapter?.dns.join(', ') || '—'} />
+          <dt>Тег</dt>
+          <dd className="data">{machine?.assetTag ?? '—'}</dd>
+          <dt>Модель</dt>
+          <dd>{machine ? `${machine.vendor} ${machine.model}` : '—'}</dd>
+          {netSeen && (
+            <>
+              <dt>Адрес</dt>
+              <Data value={adapter?.ip ?? '—'} />
+              <dt>Маска</dt>
+              <Data value={adapter?.mask ?? '—'} />
+              <dt>Шлюз</dt>
+              <Data value={adapter?.gateway || '—'} />
+              <dt>DNS</dt>
+              <Data value={adapter?.dns.join(', ') || '—'} />
+            </>
+          )}
         </dl>
+        {!netSeen && (
+          <p className="sub">Сетевые настройки ещё не смотрели.</p>
+        )}
       </div>
 
       <div className="rail-block">
@@ -107,6 +123,12 @@ export function IncidentRail() {
           <span className={flags.userConfirmed ? 'flag-on' : undefined}>
             {flags.userConfirmed ? '✓' : '—'} заявитель подтвердил
           </span>
+          {/*
+            Только после того, как случилось: постоянная строка
+            «— предупреждён о передаче» подсказывала бы, что тикет
+            ждёт эскалации.
+          */}
+          {flags.userInformed && <span className="flag-on">✓ заявитель предупреждён о передаче</span>}
           {flags.dangerousActions.length > 0 && (
             <span className="flag-bad">
               ✕ опасных действий: {flags.dangerousActions.length}

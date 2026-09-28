@@ -1,11 +1,18 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand'
-import { loadScenarios } from '../core/scenario/load'
+import { validateScenarios } from '../core/scenario/load'
 import { allHold } from '../core/scenario/check'
-import { applyInject } from '../core/world/world'
-import { SCENARIOS, scenarioFor } from '../scenarios'
+import { applyInject, createWorld } from '../core/world/world'
+import { SCENARIOS } from '../scenarios'
 import {
-  createQueue, claim, setStatus, resolve, findTicket,
+  createQueue, claim, setStatus, resolve, findTicket, park, resume,
 } from '../core/tickets/queue'
+import { createShipment as ship, type ShipmentInput, type ShipResult } from '../core/logistics/ship'
+import { advanceShipments } from '../core/logistics/advance'
+import { STAGES } from '../core/logistics/types'
+import { draftFrom } from '../core/kb/draft'
+import { editArticle as editKb, setStatus as setKbStatus, type KbResult } from '../core/kb/edit'
+import { mergeKb } from '../core/kb/search'
+import type { KbArticle, KbStatus, KbType } from '../core/kb/types'
 import {
   createQueueGenerator, fillQueue, SHIFT_WINDOW,
 } from '../core/tickets/generate'
@@ -41,6 +48,13 @@ import {
 import { createDialogue, type Dialogue } from '../core/dialogue/port'
 import { briefFor, contactBrief } from '../core/dialogue/brief'
 import { detectIntent } from '../core/dialogue/intent'
+import { HANDOFF_REPLY } from '../core/dialogue/scripted'
+import { newCli, promptOf, runSwitch, type CliState } from '../core/switchcli/cli'
+import {
+  setAccessVlan, setPortAdmin, setDescription, saveConfig as saveSwitch, setHelper,
+  type InfraResult,
+} from '../core/infra/switchops'
+import { restartServerService } from '../core/infra/serverops'
 import { loadConfig, saveConfig } from '../core/dialogue/store'
 import type { DialogueConfig } from '../core/dialogue/types'
 import type { Turn } from '../core/dialogue/types'
@@ -58,12 +72,31 @@ import {
 } from '../core/progress/db'
 
 export type Tool =
-  | 'queue' | 'ticket' | 'terminal' | 'directory' | 'comms'
+  | 'queue' | 'ticket' | 'terminal' | 'directory' | 'serverroom' | 'assets' | 'logistics' | 'kb' | 'comms'
   | 'settings' | 'scorecard' | 'history' | 'profile'
 
 export interface TerminalLine {
   kind: 'prompt' | 'output' | 'notice'
   text: string
+}
+
+/** Консоль одного коммутатора: режим, вывод и строка ввода. */
+export interface SwitchConsole {
+  cli: CliState
+  lines: TerminalLine[]
+  /** что вернуть в строку ввода — после `?` консоль возвращает набранное */
+  draft: string
+}
+
+/**
+ * Инцидент тикета, ждущего поставку: всё, что начато по нему, до
+ * повторного взятия. Журнал принадлежит инциденту и после перерыва.
+ */
+export interface ParkedIncident {
+  session: SessionLog
+  terminalLines: TerminalLine[]
+  consoles: Record<string, SwitchConsole>
+  windows: WindowsState
 }
 
 export interface GameState {
@@ -73,6 +106,20 @@ export interface GameState {
   scenarios: Scenario[]
   activeTool: Tool
   terminalLines: TerminalLine[]
+  /**
+   * Открытые консоли коммутаторов, по имени.
+   *
+   * Принадлежат инциденту, как и терминал машины: новый тикет — новые
+   * сеансы. Режим `enable`, оставшийся от прошлого инцидента, был бы
+   * тем же протеканием, что и журнал.
+   */
+  consoles: Record<string, SwitchConsole>
+  /** инциденты тикетов «Ждём поставку», по номеру тикета */
+  parked: Record<string, ParkedIncident>
+  /** что сделало последнее закрытие с базой знаний — для строки в разборе */
+  lastDraft: { id: string; created: boolean } | null
+  /** статья, открытая в «Документации» */
+  kbOpen: string | null
   scorecard: Scorecard | null
   /** сценарий закрытого тикета — разбор показывает его корневую причину */
   scoredScenarioId: string | null
@@ -121,7 +168,6 @@ export interface GameState {
    */
   shiftExhausted: boolean
 
-  start(): void
   reset(): void
   setTool(t: Tool): void
   claimTicket(number: string): void
@@ -164,7 +210,34 @@ export interface GameState {
   removeUserFromGroup(sam: string, group: string): AccountResult
   grantShareAccess(sam: string, sharePath: string): AccountResult
   /** техник открыл карточку объекта в консоли — это тоже проверка */
-  inspectObject(kind: 'user' | 'group', id: string): void
+  inspectObject(kind: 'user' | 'group' | 'device' | 'port' | 'svi' | 'asset', id: string): void
+
+  /** Часы: двигают отправления и время на экране. Интерфейс зовёт раз в секунду. */
+  tick(): void
+  /** Оформить отправление по взятому тикету. */
+  createShipment(input: ShipmentInput): ShipResult
+  /** «Ждём поставку»: отпустить слот, запарковать инцидент. */
+  waitForShipment(): { ok: boolean; error?: string }
+
+  /** Правка статьи базы знаний — новая версия. */
+  editArticle(id: string, patch: { title?: string; type?: KbType; body?: string }): KbResult
+  setArticleStatus(id: string, status: KbStatus): KbResult
+  /** Открыть статью в «Документации»; при взятом тикете — отметить осмотренной. */
+  openArticle(id: string): void
+
+  /** Открыть сеанс консоли коммутатора, если он ещё не открыт. */
+  openConsole(device: string): void
+  /** Строка в консоли коммутатора; смотреть можно всегда, менять — по тикету. */
+  runSwitchCommand(device: string, line: string): void
+  /** Ретрансляция на интерфейсе VLAN ядра — кнопка есть, но это всегда отказ. */
+  setSviHelper(sw: string, vlan: number, ip: string, add: boolean): InfraResult
+  setPortVlan(sw: string, port: string, vlan: number): InfraResult
+  setPortEnabled(sw: string, port: string, up: boolean): InfraResult
+  setPortDescription(sw: string, port: string, text: string): InfraResult
+  saveSwitchConfig(sw: string): InfraResult
+  restartServerService(server: string, service: string): InfraResult
+  /** Сказать заявителю, что заявка передана дальше и кому. */
+  informRequester(): void
   /** проверка доступа — только чтение, для окна общих ресурсов */
   checkShareAccess(sam: string, sharePath: string): boolean
 
@@ -178,6 +251,16 @@ export interface GameState {
   wipeProgress(): void
 }
 
+/** Вход на коммутатор по SSH — так начинается любой сеанс консоли. */
+const switchBanner = (): TerminalLine[] => [
+  { kind: 'output', text: '' },
+  { kind: 'output', text: 'User Access Verification' },
+  { kind: 'output', text: '' },
+  { kind: 'output', text: 'Username: helpdesk' },
+  { kind: 'output', text: 'Password: ' },
+  { kind: 'output', text: '' },
+]
+
 const banner = (): TerminalLine[] => [
   { kind: 'output', text: `${BRAND.os} [Version ${BRAND.osVersion}]` },
   { kind: 'output', text: `(c) ${BRAND.company}. All rights reserved.` },
@@ -188,6 +271,8 @@ export function createGameStore(
   clock: Clock,
   dialogueDeps?: { fetch?: Parameters<typeof createDialogue>[0]['fetch'] },
   shiftWindow = SHIFT_WINDOW,
+  /** библиотека сценариев; подменяется в тестах, которым нужен свой сценарий */
+  library: Scenario[] = SCENARIOS,
 ): UseBoundStore<StoreApi<GameState>> {
   const registry = createRegistry()
   registry.register('ipconfig', ipconfig)
@@ -215,11 +300,24 @@ export function createGameStore(
     смены, а reset начинает новую смену с тем же генератором. Прогресс
     (история прохождений) сюда не попадает — он переживает смену.
   */
-  const generator = createQueueGenerator(SCENARIOS.map(s => s.id), shiftWindow)
+  const generator = createQueueGenerator(library.map(s => s.id), shiftWindow)
+  const scenarioFor = (id: string): Scenario => {
+    const found = library.find(s => s.id === id)
+    if (!found) throw new Error(`сценарий не найден: ${id}`)
+    return found
+  }
   let shiftCounter = 0
 
+  // Опечатка в сценарии падает при запуске, а не когда до него дойдёт очередь.
+  validateScenarios(library)
+
   const fresh = () => {
-    const { world } = loadScenarios(SCENARIOS)
+    /*
+      Мир начинается исправным и ломается по мере того, как тикеты
+      входят в окно смены, — см. `fillQueue`. Сценарий, ждущий в пуле,
+      машину не трогает.
+    */
+    const world = createWorld()
     shiftCounter++
     /*
       Смена помечается временем начала, а не одним лишь счётчиком.
@@ -234,16 +332,21 @@ export function createGameStore(
     const stamp = clock.now().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)
     const shiftId = `SH-${stamp}-${shiftCounter}`
     generator.tickets = []
-    generator.pool = SCENARIOS.map(s => s.id)
+    generator.pool = library.map(s => s.id)
     generator.exhausted = false
-    fillQueue(generator, SCENARIOS)
+    generator.injected = []
+    fillQueue(generator, library, world)
     return {
       world,
       queue: createQueue(generator.tickets),
       session: createSession(),
-      scenarios: SCENARIOS,
+      scenarios: library,
       activeTool: 'queue' as Tool,
       terminalLines: banner(),
+      consoles: {},
+      parked: {},
+      lastDraft: null,
+      kbOpen: null,
       scorecard: null,
       scoredScenarioId: null,
       windows: createWindows(),
@@ -288,9 +391,14 @@ export function createGameStore(
     const merge = (loaded: Progress) => {
       progressLoaded = true
       progressPromise = null
-      const inMemory = get().progress.records
+      const inMemory = get().progress
       set({
-        progress: { ...loaded, records: [...loaded.records, ...inMemory] },
+        progress: {
+          ...loaded,
+          records: [...loaded.records, ...inMemory.records],
+          // Черновик мог появиться до конца загрузки: слияние не повторит номер.
+          kb: mergeKb(loaded.kb, inMemory.kb),
+        },
         progressLoaded: true,
       })
     }
@@ -320,21 +428,38 @@ export function createGameStore(
       return r
     }
 
+    /**
+     * Обвязка операций серверной: то же правило, что у каталога, —
+     * менять можно только по взятому тикету.
+     */
+    const infraOp = (run: (world: WorldState, session: SessionLog) => InfraResult): InfraResult => {
+      const st = get()
+      if (!st.queue.assigned) return { ok: false, error: 'нет активного инцидента' }
+      const r = run(st.world, st.session)
+      set({ world: { ...st.world }, session: { ...st.session } })
+      return r
+    }
+
+    /** Статья правится в памяти сразу, хранилище получает её следом. */
+    const commitArticle = (article: KbArticle) => {
+      const st = get()
+      const progress = { ...st.progress, kb: st.progress.kb.map(x => (x.id === article.id ? article : x)) }
+      set({ progress })
+      void saveProgress(progress).catch(() => {
+        // Хранилище недоступно — база живёт в памяти до перезагрузки.
+      })
+    }
+
     return {
     ...fresh(),
 
     /*
-      `start` и `reset` делают одно и то же — начинают смену, — и
-      различаются только тем, кто зовёт: первый вызывается явно,
-      второй кнопкой «Пройти заново». Прогресс не трогает ни тот, ни
-      другой: он переживает смену, и загружается один раз при создании
-      стора, ниже.
+      Новая смена по кнопке «Пройти заново». Первую смену собирает
+      инициализатор стора — отдельного `start()` нет: интерфейс его не
+      вызывал никогда, а звали его только тесты, и дефект, повешенный на
+      него, зелёными тестами не ловился. Прогресс смена не трогает: он
+      её переживает и загружается один раз при создании стора, ниже.
     */
-    start() {
-      const { progress, progressLoaded } = get()
-      set({ ...fresh(), progress, progressLoaded })
-    },
-
     reset() {
       const { progress, progressLoaded } = get()
       set({ ...fresh(), progress, progressLoaded })
@@ -363,6 +488,8 @@ export function createGameStore(
       }
 
       claim(q, number, clock)
+      const claimed = findTicket(q, number)
+      const { [number]: parkedHere, ...restParked } = st.parked
 
       /*
         Новый инцидент — новый журнал.
@@ -382,9 +509,22 @@ export function createGameStore(
       set({
         queue: { ...q },
         activeTool: 'ticket',
-        session: createSession(),
-        terminalLines: banner(),
-        windows: createWindows(),
+        /*
+          Тикет, ждавший поставку, возвращается со своим инцидентом:
+          журнал, вывод и консоли — те, что были до перерыва. Иначе
+          всё, что техник выяснил до отправки, пропадало бы из оценки.
+        */
+        ...(parkedHere ?? {
+          // Журнал знает свой инцидент: по нему шлюз решает, чей порт в области тикета.
+          session: createSession({
+            number, device: claimed.device, requester: claimed.requester,
+          }),
+          terminalLines: banner(),
+          consoles: {},
+          windows: createWindows(),
+        }),
+        parked: restParked,
+        lastDraft: null,
         channel: 'call',
         talkingTo: null,
         waitingReply: false,
@@ -656,9 +796,10 @@ export function createGameStore(
         системы. Флаг объявлен в срезе 0 и до появления разговора
         поднять его было нечем.
       */
-      if (detectIntent(trimmed) === 'scope') {
-        setFlag(st.session, 'scopeChecked', true)
-      }
+      const intent = detectIntent(trimmed)
+      if (intent === 'scope') setFlag(st.session, 'scopeChecked', true)
+      // Сказать о передаче словами — то же, что кнопкой «Сообщить о передаче».
+      if (intent === 'handoff') setFlag(st.session, 'userInformed', true)
 
       set({
         session: { ...st.session },
@@ -749,15 +890,22 @@ export function createGameStore(
       const st = get()
       openWindow(st.windows, id)
 
+      /*
+        Открытое окно — доказательство, как открытая карточка: цель
+        «посмотреть диспетчер устройств» закрывается записью
+        `gui:app:devmgmt`. Без взятого тикета журнал черновой — писать
+        некуда.
+      */
+      const key = `app:${id}`
+      if (st.queue.assigned && !st.session.inspected.includes(key)) st.session.inspected.push(key)
+
       // Открытие просмотра событий — само по себе действие техника:
       // именно оно отличает «запустил службу» от «разобрался».
       if (id === 'eventvwr' && !st.session.flags.eventLogRead) {
         setFlag(st.session, 'eventLogRead', true)
-        set({ windows: { ...st.windows }, session: { ...st.session } })
-        return
       }
 
-      set({ windows: { ...st.windows } })
+      set({ windows: { ...st.windows }, session: { ...st.session } })
     },
 
     closeApp(id) {
@@ -899,6 +1047,187 @@ export function createGameStore(
       set({ session: { ...st.session } })
     },
 
+    openConsole(device) {
+      const st = get()
+      if (st.consoles[device]) return
+      set({ consoles: { ...st.consoles, [device]: { cli: newCli(device), lines: switchBanner(), draft: '' } } })
+    },
+
+    runSwitchCommand(device, line) {
+      const st = get()
+      const open = st.consoles[device] ?? { cli: newCli(device), lines: switchBanner(), draft: '' }
+
+      /*
+        Без взятого тикета консоль работает на черновом журнале без
+        инцидента: смотреть можно, шлюз любое изменение отклонит, а
+        журнал закрытого инцидента не пополнится чужими командами.
+      */
+      const session = st.queue.assigned ? st.session : createSession()
+      const r = runSwitch(line, open.cli, { world: st.world, session, clock, device })
+
+      const lines: TerminalLine[] = [
+        ...open.lines,
+        { kind: 'prompt', text: `${promptOf(open.cli)}${line}` },
+        ...(r.stdout ? r.stdout.split(/\r?\n/).map(text => ({ kind: 'output' as const, text })) : []),
+      ]
+      set({
+        world: { ...st.world },
+        session: { ...st.session },
+        consoles: { ...st.consoles, [device]: { cli: r.state, lines, draft: r.prefill ?? '' } },
+      })
+    },
+
+    setPortVlan(sw, port, vlan) {
+      return infraOp((world, session) => setAccessVlan(world, sw, port, vlan, session, clock))
+    },
+
+    setPortEnabled(sw, port, up) {
+      return infraOp((world, session) => setPortAdmin(world, sw, port, up, session, clock))
+    },
+
+    setPortDescription(sw, port, text) {
+      return infraOp((world, session) => setDescription(world, sw, port, text, session, clock))
+    },
+
+    saveSwitchConfig(sw) {
+      return infraOp((world, session) => saveSwitch(world, sw, session, clock))
+    },
+
+    setSviHelper(sw, vlan, ip, add) {
+      return infraOp((world, session) => setHelper(world, sw, vlan, ip, add, session, clock))
+    },
+
+    restartServerService(server, service) {
+      return infraOp((world, session) => restartServerService(world, server, service, session, clock))
+    },
+
+    /**
+     * Сообщить заявителю о передаче.
+     *
+     * Для эскалации это то же, что подтверждение для починки: человек
+     * без сети должен знать, что заявка ушла, кому и чего ждать.
+     */
+    informRequester() {
+      const st = get()
+      const assigned = st.queue.assigned
+      if (!assigned) return
+
+      const ticket = findTicket(st.queue, assigned)
+      const said = 'Передаю вашу заявку сетевой группе — это настройка сетевого оборудования, '
+        + 'у меня нет к ней доступа. Сообщу, когда починят.'
+
+      recordDialogue(st.session, clock, 'call', ticket.requester, 'technician', said)
+      recordDialogue(st.session, clock, 'call', ticket.requester, 'requester', HANDOFF_REPLY)
+      setFlag(st.session, 'userInformed', true)
+
+      const at = clock.now().toISOString()
+      ticket.communications.push(
+        { at, channel: 'call', from: 'technician', with: ticket.requester, text: said },
+        { at, channel: 'call', from: ticket.requester, with: ticket.requester, text: HANDOFF_REPLY },
+      )
+      set({ session: { ...st.session }, queue: { ...st.queue } })
+    },
+
+    tick() {
+      const st = get()
+      const now = clock.now()
+      const events = advanceShipments(st.world, now)
+      if (events.length === 0) {
+        set({ now })
+        return
+      }
+
+      /*
+        Доставка по тикету дописывает рабочую заметку и возвращает
+        ждущий тикет в работу. Закрытый тикет из окна смены уже ушёл —
+        его доставка просто меняет учёт.
+      */
+      const q = st.queue
+      for (const e of events) {
+        if (!e.final || e.direction !== 'to-desk' || !e.ticket) continue
+        const t = q.tickets.find(x => x.number === e.ticket)
+        const sh = st.world.shipments.find(x => x.id === e.id)
+        if (!t || !sh) continue
+        const line = `${sh.history.at(-1)!.at.slice(11, 16)} Отправление ${e.id} доставлено: ${sh.destination}.`
+        t.workNotes = t.workNotes ? `${t.workNotes}\n${line}` : line
+        resume(q, e.ticket)
+      }
+      set({ now, world: { ...st.world }, queue: { ...q } })
+    },
+
+    createShipment(input) {
+      const st = get()
+      if (!st.queue.assigned) return { ok: false, error: 'нет активного инцидента' }
+      const r = ship(st.world, input, st.session, clock)
+      set({ world: { ...st.world }, session: { ...st.session } })
+      return r
+    },
+
+    waitForShipment() {
+      const st = get()
+      const number = st.queue.assigned
+      if (!number) return { ok: false, error: 'нет активного инцидента' }
+
+      // Правило живёт здесь, а не в кнопке: ждать можно только то, что едет.
+      const last = STAGES['to-desk'].length - 1
+      const enRoute = st.world.shipments.some(x =>
+        x.ticket === number && x.direction === 'to-desk' && x.stage < last)
+      if (!enRoute) return { ok: false, error: 'по тикету нет отправления в пути — ждать нечего' }
+
+      park(st.queue, number)
+      set({
+        queue: { ...st.queue },
+        parked: {
+          ...st.parked,
+          [number]: {
+            session: st.session, terminalLines: st.terminalLines,
+            consoles: st.consoles, windows: st.windows,
+          },
+        },
+        session: createSession(),
+        terminalLines: banner(),
+        consoles: {},
+        windows: createWindows(),
+        channel: 'call',
+        talkingTo: null,
+        waitingReply: false,
+        dialogueNotice: null,
+        activeTool: 'queue',
+      })
+      return { ok: true }
+    },
+
+    editArticle(id, patch) {
+      const a = get().progress.kb.find(x => x.id === id)
+      if (!a) return { ok: false, error: `статья ${id} не найдена` }
+      const r = editKb(a, patch, clock.now().toISOString())
+      if (r.ok && r.article !== a) commitArticle(r.article)
+      return r
+    },
+
+    setArticleStatus(id, status) {
+      const a = get().progress.kb.find(x => x.id === id)
+      if (!a) return { ok: false, error: `статья ${id} не найдена` }
+      const r = setKbStatus(a, status, clock.now().toISOString())
+      if (r.ok) commitArticle(r.article)
+      return r
+    },
+
+    openArticle(id) {
+      const st = get()
+      /*
+        Заглянуть в базу — законный приём, и разбор это покажет. Без
+        взятого тикета журнал принадлежит закрытому инциденту — писать в
+        него нельзя.
+      */
+      const key = `kb:${id.toLowerCase()}`
+      if (st.queue.assigned && !st.session.inspected.includes(key)) {
+        st.session.inspected.push(key)
+        set({ session: { ...st.session } })
+      }
+      set({ kbOpen: id, activeTool: 'kb' })
+    },
+
     checkShareAccess(sam, sharePath) {
       return hasShareAccess(get().world, sam, sharePath)
     },
@@ -922,14 +1251,17 @@ export function createGameStore(
       */
       resolve(st.queue, assigned, ticket.resolutionCode)
 
-      const scorecard = gradeIncident({
-        world: st.world,
-        ticket,
-        session: st.session,
-        scenario: scenarioFor(ticket.scenarioId),
-      })
+      const scenario = scenarioFor(ticket.scenarioId)
+      const scorecard = gradeIncident({ world: st.world, ticket, session: st.session, scenario })
 
-      fillQueue(generator, SCENARIOS)
+      /*
+        Вторая линия чинит после передачи — после оценки, чтобы разбор
+        видел мир таким, каким его оставил техник, и до наполнения
+        очереди, чтобы следующий тикет пришёл в починенный мир.
+      */
+      if (ticket.resolutionCode === 'escalate') applyInject(st.world, scenario.onEscalate ?? [])
+
+      fillQueue(generator, library, st.world)
 
       /*
         Единственная точка записи прохождения: после оценки, после
@@ -948,17 +1280,27 @@ export function createGameStore(
         shiftId: st.shiftId,
         clock,
       })
+      /*
+        Заметка закрытого тикета становится черновиком статьи — в том же
+        `set`, что и запись прохождения: база знаний — часть прогресса и
+        живёт по его правилу «сначала память, потом хранилище».
+      */
+      const draft = draftFrom(st.progress.kb, record)
       const progress = {
         ...st.progress,
         records: [...st.progress.records, record],
+        kb: draft.kb,
       }
 
       set({
+        // Вошедший тикет мог сломать свою машину — мир изменился.
+        world: { ...st.world },
         queue: createQueue(generator.tickets),
         scorecard,
         scoredScenarioId: ticket.scenarioId,
         activeTool: 'scorecard',
         progress,
+        lastDraft: draft.id ? { id: draft.id, created: draft.created } : null,
         shiftExhausted: generator.exhausted,
         // Свой разбор вытесняет чужой: иначе экран покажет прошлое.
         viewing: null,
@@ -977,7 +1319,7 @@ export function createGameStore(
       // Возвращаем в пул — без штрафа, это отложенное дело.
       generator.pool.push(t.scenarioId)
       generator.tickets = q.tickets.filter(x => x.number !== number)
-      fillQueue(generator, SCENARIOS)
+      fillQueue(generator, library, st.world)
 
       /*
         Скрыли чужой тикет — текущий остаётся на вас.
@@ -991,7 +1333,14 @@ export function createGameStore(
       const queue = createQueue(generator.tickets)
       if (!hidMine) queue.assigned = q.assigned
 
-      const next = { queue, shiftExhausted: generator.exhausted }
+      // Номер тикета выводится из сценария: вернувшийся экземпляр не должен найти чужую парковку.
+      const { [number]: _dropped, ...parked } = st.parked
+      const next = {
+        world: { ...st.world },
+        queue,
+        parked,
+        shiftExhausted: generator.exhausted,
+      }
       if (hidMine) set({ ...next, activeTool: 'queue' })
       else set(next)
     },
@@ -1016,9 +1365,9 @@ export function createGameStore(
   })
 
   /*
-    Гидратация — при создании стора, а не в `start`.
+    Гидратация — при создании стора, а не в `start`, которого больше нет.
 
-    Найдено визуальной проверкой: интерфейс `start` не вызывает вовсе,
+    Найдено визуальной проверкой: интерфейс `start` не вызывал вовсе,
     смену собирает сам инициализатор, — и экраны истории и профиля
     показывали «Загружается…» вечно. Тесты этого не видели: каждый звал
     `start` руками.

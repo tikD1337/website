@@ -7,6 +7,9 @@ import {
 import {
   FIELD_QUESTION, FIELD_LABEL, type VerificationField,
 } from '../core/directory/identity'
+import { SHIPMENT_TYPES } from '../core/logistics/types'
+import { relatedTo } from '../core/kb/search'
+import { TYPE_LABEL, STATUS_LABEL } from '../core/kb/types'
 
 const FIELDS = Object.keys(FIELD_QUESTION) as VerificationField[]
 
@@ -35,11 +38,16 @@ export function TicketView() {
   const resolveTicket = useGame(s => s.resolveTicket)
   const verifyRequester = useGame(s => s.verifyRequester)
   const confirmWithUser = useGame(s => s.confirmWithUser)
+  const informRequester = useGame(s => s.informRequester)
   const askRequesterTo = useGame(s => s.askRequesterTo)
   const callTo = useGame(s => s.callTo)
   const scenarios = useGame(s => s.scenarios)
   const setTicketStatus = useGame(s => s.setTicketStatus)
   const setTool = useGame(s => s.setTool)
+  const waitForShipment = useGame(s => s.waitForShipment)
+  const kb = useGame(s => s.progress.kb)
+  const openArticle = useGame(s => s.openArticle)
+  const [waitError, setWaitError] = useState<string | null>(null)
 
   const ticket = queue.tickets.find(t => t.number === queue.assigned)
   const [draft, setDraft] = useState('')
@@ -49,6 +57,7 @@ export function TicketView() {
 
   useEffect(() => {
     setDraft(ticket?.resolutionNotes ?? '')
+    setWaitError(null)
   }, [ticket?.number])
 
   if (!ticket) {
@@ -61,6 +70,8 @@ export function TicketView() {
   }
 
   const user = world.org.users.find(u => u.samAccountName === ticket.requester)
+  const shipments = world.shipments.filter(x => x.ticket === ticket.number)
+  const related = relatedTo(kb, ticket)
   const canResolve = ticket.resolutionCode !== null
   /*
     Показываем только те просьбы, которые техник уже заслужил
@@ -88,6 +99,35 @@ export function TicketView() {
           {user?.displayName}, {user?.title}, {user?.dept}
         </p>
       </div>
+
+      {/*
+        Свои статьи по той же проблеме. База пишется закрытыми тикетами,
+        и увидеть здесь собственную заметку прошлой смены — законный
+        приём: баллов он не даёт и не отнимает.
+      */}
+      {related.length > 0 && (
+        <div className="section">
+          <h2>База знаний</h2>
+          <table>
+            <thead>
+              <tr><th>Номер</th><th>Заголовок</th><th>Тип</th><th>Статус</th><th /></tr>
+            </thead>
+            <tbody>
+              {related.map(a => (
+                <tr key={a.id}>
+                  <td className="data">{a.id}</td>
+                  <td>{a.title}</td>
+                  <td>{TYPE_LABEL[a.type]}</td>
+                  <td>{STATUS_LABEL[a.status]}</td>
+                  <td>
+                    <button className="act" type="button" onClick={() => openArticle(a.id)}>Открыть</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/*
         Сверка личности — настоящая проверка, а не кнопка «я подтвердил».
@@ -151,6 +191,14 @@ export function TicketView() {
         </button>
 
         {/*
+          Для эскалации это то же, что звонок с вопросом «получилось?»
+          для починки: человек без сети должен знать, что заявка ушла.
+        */}
+        <button className="act" type="button" onClick={informRequester}>
+          Сообщить о передаче
+        </button>
+
+        {/*
           Быстрая кнопка спрашивает одно: «получилось?». Разговор целиком
           — в инструменте «Связь», где можно задать любой вопрос и
           позвонить не только заявителю.
@@ -170,6 +218,7 @@ export function TicketView() {
         <select
           aria-label="Рабочий статус"
           value={WORKFLOW_STATUSES.includes(ticket.status as WorkflowStatus)
+            || ticket.status === 'pending-shipment'
             ? ticket.status
             : 'assigned'}
           onChange={e => setTicketStatus(e.target.value as WorkflowStatus)}
@@ -177,8 +226,57 @@ export function TicketView() {
           {WORKFLOW_STATUSES.map(s => (
             <option key={s} value={s}>{STATUS_LABELS[s]}</option>
           ))}
+          {/* Ставится кнопкой: правило «ждать можно только то, что едет» живёт в сторе. */}
+          <option value="pending-shipment" disabled>{STATUS_LABELS['pending-shipment']}</option>
         </select>
+
+        <button
+          className="act"
+          type="button"
+          onClick={() => {
+            const r = waitForShipment()
+            setWaitError(r.ok ? null : r.error ?? null)
+          }}
+        >
+          Ждём поставку
+        </button>
       </div>
+      {waitError && <p className="deny">{waitError}</p>}
+
+      {/*
+        Рабочие заметки — то, что происходило с тикетом без техника:
+        доставка по отправлению. Найдено на снимке: заметка писалась, но
+        видно её не было нигде, и вернувшийся к тикету не знал, что
+        замена уже на столе.
+      */}
+      {ticket.workNotes && (
+        <div className="section">
+          <h2>Рабочие заметки</h2>
+          <p className="prose work-notes">{ticket.workNotes}</p>
+        </div>
+      )}
+
+      {shipments.length > 0 && (
+        <div className="section">
+          <h2>Отправления по тикету</h2>
+          <table>
+            <thead>
+              <tr><th>Номер</th><th>Тип</th><th>Актив</th><th>Куда</th><th>Этап</th></tr>
+            </thead>
+            <tbody>
+              {shipments.map(x => (
+                <tr key={x.id}>
+                  <td className="data">{x.id}</td>
+                  <td>{SHIPMENT_TYPES[x.type].label}</td>
+                  <td className="data">{x.assetTag}</td>
+                  <td>{x.destination}</td>
+                  <td>{x.history.at(-1)!.stage}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/*
         Просьбы к заявителю.

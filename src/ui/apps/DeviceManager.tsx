@@ -1,4 +1,5 @@
 import { useGame } from '../../store/useGame'
+import { peripheralsOf } from '../../core/device/peripherals'
 
 /**
  * Диспетчер устройств.
@@ -30,8 +31,9 @@ export function DeviceManager() {
           </tr>
         </thead>
         <tbody>
-          {device.drivers.map(d => (
-            <tr key={d.device}>
+          {/* Встроенные устройства — из машины, периферия — из учёта: док, гарнитура, мониторы. */}
+          {[...device.drivers, ...peripheralsOf(world, device.hostname)].map((d, i) => (
+            <tr key={`${d.device}-${i}`}>
               <td>
                 {d.device}
                 {d.problemText && <div className="sub bad">{d.problemText}</div>}

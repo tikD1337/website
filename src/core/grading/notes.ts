@@ -37,20 +37,45 @@ function changedValues(session: SessionLog): string[] {
       сценарии. Без этого грейдер требовал бы от техника цитировать
       служебные строки вроде «running», что заметку только испортит.
     */
-    const parts = c.path.split('.')
+    const parts = c.path.replace(/\[[^\]]*\]/g, '').split('.')
     for (const p of parts.slice(2)) {
       if (p.length >= 3 && !['services', 'adapters', 'status'].includes(p)) {
         out.push(p.toLowerCase())
       }
+    }
+
+    /*
+      Имя объекта из селектора пути: `ports[name=Gi1/0/22]`,
+      `switches[hostname=SW-FL3-01]`. «Перевёл Gi1/0/22 в VLAN 20»
+      так же конкретно, как «запустил Spooler».
+    */
+    for (const m of c.path.matchAll(/\[[^=\]]+=([^\]]+)\]/g)) {
+      if (m[1]!.length >= 3) out.push(m[1]!.toLowerCase())
     }
   }
 
   return [...new Set(out)]
 }
 
-/** Команды, реально запускавшиеся в сессии. */
-function ranCommands(session: SessionLog): string[] {
-  return [...new Set(session.commands.map(c => norm(c.cmdline)))]
+/**
+ * Команды, реально запускавшиеся в сессии, — и набранные, и в полной
+ * форме: техник вправе набрать `sh run int vlan 20`, а в заметке
+ * написать как положено.
+ */
+function ranCommands(session: SessionLog, where?: (device: string) => boolean): string[] {
+  return [...new Set(session.commands
+    .filter(c => !where || where(c.device))
+    .flatMap(c => [c.cmdline, c.canonical ?? ''].filter(Boolean).map(norm)))]
+}
+
+/**
+ * Имена объектов серверной, чьи карточки техник открывал:
+ * `svi:cr-01/vlan20` → `cr-01`, `vlan20`.
+ */
+function inspectedInfra(session: SessionLog): string[] {
+  return session.inspected
+    .filter(k => /^(device|port|svi):/.test(k))
+    .flatMap(k => k.slice(k.indexOf(':') + 1).toLowerCase().split('/'))
 }
 
 /** Команды, завершившиеся неуспешно — «проверки, которые ничего не дали». */
@@ -116,6 +141,8 @@ export function gradeNote(
     'членство в группах', 'членстве в группах', 'состав группы',
     'последний вход', 'последнем входе', 'счётчик неудачных',
     'билет', 'группе доступа', 'группу доступа',
+    // Срез 6Б: учёт оборудования — проверка гарантии в карточке актива.
+    'cmdb', 'карточке актива', 'гаранти',
   ]
   const namedGui = GUI_EVIDENCE.filter(g => n.includes(g))
   const evidenceCount = namedCommands.length + namedGui.length
@@ -138,17 +165,86 @@ export function gradeNote(
   // 3. Конкретное изменение: названо значение из журнала изменений.
   const changeEarned = values.some(v => n.includes(v))
 
+  /*
+    3'. У эскалации вместо изменения — что передано.
+
+    Передача без доказательства — перекладывание: вторая линия начнёт
+    с нуля. Доказательство — проверка за пределами машины заявителя,
+    названная в заметке: команда на коммутаторе или карточка устройства
+    в серверной. И сам факт передачи словами.
+  */
+  const escalation = scenario.expectedResolution === 'escalate'
+  const compact = n.replace(/\s+/g, '')
+  const offMachine = ranCommands(session, d => d !== ticket.device).some(c => n.includes(c))
+    || inspectedInfra(session).some(o => compact.includes(o.replace(/\s+/g, '')))
+  const namesHandoff = ['переда', 'эскал', 'второй линии', 'вторую линию', 'сетевой групп', 'сетевым инженер']
+    .some(t => n.includes(t))
+  const escalationEarned = offMachine && namesHandoff
+
   // 4. Подтверждение: оно состоялось И упомянуто в заметке.
   const confirmed = confirmationHappened(session)
   const mentionsConfirm = ['подтверд', 'заявител', 'пользовател', 'проверено']
     .some(t => n.includes(t))
   const verificationEarned = confirmed && mentionsConfirm
 
+  // 4'. У эскалации вместо подтверждения — заявитель предупреждён, и это записано.
+  const informed = session.flags.userInformed
+  const mentionsInformed = ['предупрежд', 'сообщ', 'уведом', 'в курсе', 'заявител', 'пользовател']
+    .some(t => n.includes(t))
+  const informedEarned = informed && mentionsInformed
+
   // 5. Что нужно следующему технику.
   const handoffEarned = [
     'причин', 'при повторении', 'повторится', 'следующ', 'эскал',
     'сетев', 'второй линии', 'вторую линию', 'драйвер', 'заменён', 'заменен',
   ].some(t => n.includes(t))
+
+  const repairParts: NotePart[] = [
+    {
+      id: 'change',
+      label: 'Внесённое изменение',
+      earned: changeEarned,
+      explain: changeEarned
+        ? 'Изменение названо конкретным значением из журнала.'
+        : 'Не названо конкретное значение — адрес, служба или учётная запись. '
+          + '«Починил» не позволяет повторить или откатить.',
+    },
+    {
+      id: 'verification',
+      label: 'Чем подтверждено',
+      earned: verificationEarned,
+      explain: verificationEarned
+        ? 'Подтверждение состоялось и упомянуто в заметке.'
+        : confirmed
+          ? 'Подтверждение было, но в заметке о нём ни слова.'
+          : 'Подтверждения от заявителя вообще не было — проверка со своего '
+            + 'экрана его не заменяет.',
+    },
+  ]
+
+  const escalationParts: NotePart[] = [
+    {
+      id: 'escalation',
+      label: 'Что передано',
+      earned: escalationEarned,
+      explain: escalationEarned
+        ? 'Передача названа, и к ней приложена проверка за пределами машины заявителя.'
+        : offMachine
+          ? 'Проверка на сетевом устройстве названа, но не сказано, что и кому передано.'
+          : 'Не названа ни одна проверка за пределами машины заявителя — команда на '
+            + 'коммутаторе или карточка в серверной. Без неё вторая линия начнёт с нуля.',
+    },
+    {
+      id: 'informed',
+      label: 'Заявитель предупреждён',
+      earned: informedEarned,
+      explain: informedEarned
+        ? 'Заявителю сказали о передаче, и это записано.'
+        : informed
+          ? 'Заявителя предупредили, но в заметке об этом ни слова.'
+          : 'Заявителю не сказали, что заявка передана дальше, — он не знает, чего ждать.',
+    },
+  ]
 
   const parts: NotePart[] = [
     {
@@ -171,26 +267,7 @@ export function gradeNote(
           : 'Не сказано, что какая-то из проверок ничего не дала. Именно это '
             + 'показывает, что версия была отброшена, а не забыта.',
     },
-    {
-      id: 'change',
-      label: 'Внесённое изменение',
-      earned: changeEarned,
-      explain: changeEarned
-        ? 'Изменение названо конкретным значением из журнала.'
-        : 'Не названо конкретное значение — адрес, служба или учётная запись. '
-          + '«Починил» не позволяет повторить или откатить.',
-    },
-    {
-      id: 'verification',
-      label: 'Чем подтверждено',
-      earned: verificationEarned,
-      explain: verificationEarned
-        ? 'Подтверждение состоялось и упомянуто в заметке.'
-        : confirmed
-          ? 'Подтверждение было, но в заметке о нём ни слова.'
-          : 'Подтверждения от заявителя вообще не было — проверка со своего '
-            + 'экрана его не заменяет.',
-    },
+    ...(escalation ? escalationParts : repairParts),
     {
       id: 'handoff',
       label: 'Что нужно следующему',
@@ -224,7 +301,7 @@ export function gradeNote(
     })
   }
 
-  if (wordCount < 12 && !changeEarned) {
+  if (wordCount < 12 && !(escalation ? escalationEarned : changeEarned)) {
     penalties.push({
       id: 'no-specifics',
       label: 'Отписка без единой конкретики',
@@ -237,6 +314,5 @@ export function gradeNote(
   const deduction = penalties.reduce((a, p) => a + p.points, 0)
   const score = Math.max(0, raw - deduction)
 
-  void ticket
   return { score, parts, penalties }
 }

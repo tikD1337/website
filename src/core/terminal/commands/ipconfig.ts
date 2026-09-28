@@ -2,14 +2,12 @@ import { BRAND } from '../../../brand'
 import { field, continuation, joinLines } from '../format'
 import { recordChange } from '../../session/session'
 import type { CommandHandler, CommandContext, CommandResult } from '../types'
-import type { Adapter, NetworkSegment } from '../../world/types'
+import { linkOf } from '../../network/link'
+import { acquireLease } from '../../network/dhcp'
+import type { Adapter } from '../../world/types'
 
 function adaptersOf(ctx: CommandContext): Adapter[] {
   return ctx.world.devices[ctx.device]?.adapters ?? []
-}
-
-function segmentOf(ctx: CommandContext, a: Adapter): NetworkSegment | undefined {
-  return ctx.world.network.segments.find(s => s.vlan === a.segment)
 }
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -47,7 +45,7 @@ function renderAll(ctx: CommandContext): string {
     lines.push(`Ethernet adapter ${a.name}:`, '')
 
     // Опущенный линк обрывает вывод на Media State — так же, как Windows.
-    if (!a.linkUp) {
+    if (!linkOf(ctx.world, ctx.device)) {
       lines.push(field('mediaState', 'Media disconnected'))
       lines.push(field('dnsSuffix', BRAND.dnsSuffix))
       lines.push(field('description', a.description))
@@ -93,7 +91,7 @@ function renderBrief(ctx: CommandContext): string {
 
   for (const a of adaptersOf(ctx)) {
     lines.push(`Ethernet adapter ${a.name}:`, '')
-    if (!a.linkUp) {
+    if (!linkOf(ctx.world, ctx.device)) {
       lines.push(field('mediaState', 'Media disconnected'))
       lines.push(field('dnsSuffix', BRAND.dnsSuffix))
       lines.push('')
@@ -138,8 +136,6 @@ function doRenew(ctx: CommandContext): CommandResult {
   const a = adaptersOf(ctx)[0]
   if (!a) return { stdout: joinLines(header('Ethernet')), exitCode: 1 }
 
-  const seg = segmentOf(ctx, a)
-
   /**
    * Предусловие, ради которого всё и затевалось.
    *
@@ -149,10 +145,10 @@ function doRenew(ctx: CommandContext): CommandResult {
    * отличает диагностику от заучивания: очевидная команда не работает,
    * и надо понять почему.
    */
-  const holdsApipa = a.autoconfigured
-  const dhcpReachable = Boolean(seg?.dhcpHealthy) && a.linkUp
+  const before = a.ip
+  const result = a.autoconfigured ? { ok: false as const } : acquireLease(ctx.world, ctx.device, ctx.clock)
 
-  if (holdsApipa || !dhcpReachable) {
+  if (!result.ok) {
     return {
       stdout: joinLines([
         ...header(a.name),
@@ -164,18 +160,7 @@ function doRenew(ctx: CommandContext): CommandResult {
     }
   }
 
-  const before = a.ip
-  const now = ctx.clock.now()
-  const lease = seg!.leasePool[0] ?? '10.20.14.88'
-
-  a.ip = lease
-  a.mask = '255.255.255.0'
-  a.gateway = seg!.gateway
-  a.dns = [...seg!.dns]
-  a.autoconfigured = false
-  a.leaseObtained = now.toISOString()
-  a.leaseExpires = new Date(now.getTime() + 24 * 3600 * 1000).toISOString()
-
+  const lease = result.ip
   recordChange(ctx.session, ctx.clock,
     `devices.${ctx.device}.adapters[0].ip`, before, lease, true)
 

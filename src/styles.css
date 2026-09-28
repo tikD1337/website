@@ -368,6 +368,14 @@ textarea::placeholder { color: var(--faint); }
   tab-size: 4;
 }
 
+/*
+  Пустая строка вывода — тоже строка. Пустой блок не имеет высоты, и
+  вывод ipconfig и show терял пустые строки, слипаясь в сплошной текст
+  (найдено на снимке консоли коммутатора; терминал машины страдал так
+  же, но незаметно).
+*/
+.term > div:empty::before { content: "\200b"; }
+
 .term .prompt { color: #e8edf3; }
 .term .notice { color: var(--warn); white-space: pre-wrap; }
 
@@ -747,6 +755,100 @@ tr.sel td { background: #232c38; }
   .dir { grid-template-columns: minmax(0, 1fr); }
   .dir-tree { flex-direction: row; flex-wrap: wrap; }
 }
+
+/* ── серверная ───────────────────────────────────────────── */
+
+.room-group { display: flex; flex-direction: column; margin-bottom: 8px; }
+.room-group > .sub { padding: 4px 6px 2px; }
+
+.room-title {
+  margin: 0 0 8px;
+  font: 600 16px/1.3 var(--mono);
+}
+
+/*
+  Лицевая панель: блоки по двенадцать портов, нечётные сверху, чётные
+  снизу — как на железе. Порт — кнопка, поэтому скруглён; выбранный —
+  рамкой и яркостью, не цветом.
+*/
+.ports {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px;
+  background: var(--sunk);
+  border: 1px solid var(--line-2);
+}
+
+.port-block {
+  display: grid;
+  grid-template-rows: repeat(2, auto);
+  grid-auto-flow: column;
+  gap: 3px;
+}
+
+.port {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 30px;
+  padding: 3px 0 2px;
+  background: #1a2029;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  font: 11px/1.1 var(--mono);
+  cursor: pointer;
+}
+
+.port .sym { font-size: 13px; color: var(--text); }
+.port:hover { border-color: var(--line-2); color: var(--text); }
+.port[aria-pressed="true"] { border-color: var(--text); background: #2a323d; color: var(--text); }
+
+.legend { display: flex; gap: 16px; margin: 6px 0 0; }
+
+.room table { margin-top: 12px; }
+.room td button.act { padding: 3px 9px; }
+
+/*
+  Консоль коммутатора — сеанс SSH, а не окно Windows: таблицы IOS шире
+  восьмидесяти колонок, и перенос разваливал их на две строки (найдено
+  на снимке). Строки не переносятся, блок прокручивается вбок сам.
+*/
+.term.switch-term {
+  height: calc(100vh - 260px);
+  min-height: 260px;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.term.switch-term input { min-width: 20ch; }
+
+/* ── логистика ───────────────────────────────────────────── */
+
+/* Тег и номер отслеживания — одно слово: перенос посередине («AL-/P2040») найден на снимке. */
+table.journal td.data { white-space: nowrap; }
+
+.work-notes { white-space: pre-line; }
+
+/* ── база знаний ─────────────────────────────────────────── */
+
+/* Заметка пишется абзацами, и статья обязана их сохранить. */
+.kb-body { white-space: pre-line; overflow-wrap: anywhere; }
+
+.kb-title { flex: 1 1 30ch; min-width: 0; max-width: 60ch; }
+
+/* Номер статьи — одно слово: на 900 пикселях «KB-/0001» переносился. */
+.kb-list td.data { white-space: nowrap; }
+
+/* Текст статьи отделён от метаданных: на снимке он начинался впритык к «Из тикетов». */
+.kv + .kb-body { margin-top: 14px; }
+
+.kb-history { margin-top: 18px; }
+.kb-history h3 { margin: 0 0 10px; font-size: 12px; font-weight: 600; color: var(--dim); }
+.kb-history details { margin: 0 0 8px; }
+.kb-history summary { cursor: pointer; font-size: 13px; color: var(--dim); }
+.kb-history details .kb-body { margin: 6px 0 0 14px; }
 
 /* ── панель задач ────────────────────────────────────────── */
 

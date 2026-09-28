@@ -16,105 +16,49 @@ beforeEach(() => {
   session = createSession()
 })
 
-describe('verifyIdentity', () => {
-  it('верный ответ поднимает флаг и запоминает, кого сверяли', () => {
-    const r = verifyIdentity(world, 'p.raman', 'manager', 'Elena Varga', session, clock)
-    expect(r.ok).toBe(true)
+/**
+ * Сверка личности — настоящая проверка, а не кнопка «я подтвердил»:
+ * техник выбирает контрольное поле, вводит услышанный ответ, ответ
+ * сверяется с каталогом. И она относится к конкретной учётке.
+ */
+describe('сверка личности', () => {
+  it('верный ответ по любому полю подтверждает и запоминает, кого сверяли', () => {
+    // Не придирается к регистру и лишним пробелам.
+    expect(verifyIdentity(world, 'p.raman', 'manager', '  elena   varga ', session, clock).ok).toBe(true)
     expect(session.flags.identityVerified).toBe(true)
     expect(session.verifiedAccount).toBe('p.raman')
+
+    for (const [field, answer] of [['office', '3-14'], ['dept', 'Продажи']] as const) {
+      expect(verifyIdentity(world, 'p.raman', field, answer, createSession(), clock).ok, field)
+        .toBe(true)
+    }
   })
 
-  it('неверный ответ флаг не поднимает', () => {
-    const r = verifyIdentity(world, 'p.raman', 'manager', 'Кто-то другой', session, clock)
-    expect(r.ok).toBe(false)
+  it('неудача не подтверждает, но объясняет и остаётся в журнале общения', () => {
+    const wrong = verifyIdentity(world, 'p.raman', 'office', 'мимо', session, clock)
+    expect(wrong).toMatchObject({ ok: false, expected: '3-14' })
+    expect(session.flags.identityVerified).toBe(false)
+    expect(session.dialogue.map(d => [d.speaker, d.text])).toEqual([
+      ['technician', FIELD_QUESTION.office],
+      ['requester', 'мимо'],
+    ])
+
+    // У операционного директора нет руководителя — пустое поле не проходит.
+    expect(verifyIdentity(world, 'd.mbeki', 'manager', '', session, clock).error).toContain('не заполнено')
+    expect(verifyIdentity(world, 'нет.такого', 'manager', 'кто-то', session, clock).error)
+      .toContain('не найдена')
     expect(session.flags.identityVerified).toBe(false)
   })
 
-  it('не придирается к регистру и лишним пробелам', () => {
-    const r = verifyIdentity(world, 'p.raman', 'manager', '  elena   varga ', session, clock)
-    expect(r.ok).toBe(true)
-  })
+  /* Сверив одного обратившегося, техник не получает права менять чужие аккаунты. */
+  it('открывает операции только над тем же аккаунтом', () => {
+    expect(isVerifiedFor(session, 'p.raman')).toBe(false)
+    expect(resetPassword(world, 'p.raman', session, clock).flagged).toBe(true)
 
-  it('сверяет по кабинету', () => {
-    expect(verifyIdentity(world, 'p.raman', 'office', '3-14', session, clock).ok).toBe(true)
-  })
-
-  it('сверяет по отделу', () => {
-    expect(verifyIdentity(world, 'p.raman', 'dept', 'Продажи', session, clock).ok).toBe(true)
-  })
-
-  it('попытка сверки пишется в журнал общения — и вопрос, и ответ', () => {
-    verifyIdentity(world, 'p.raman', 'manager', 'Elena Varga', session, clock)
-    expect(session.dialogue).toHaveLength(2)
-    expect(session.dialogue[0]!.speaker).toBe('technician')
-    expect(session.dialogue[0]!.text).toBe(FIELD_QUESTION.manager)
-    expect(session.dialogue[1]!.speaker).toBe('requester')
-    expect(session.dialogue[1]!.text).toBe('Elena Varga')
-  })
-
-  it('неудачная попытка тоже остаётся в журнале', () => {
-    verifyIdentity(world, 'p.raman', 'manager', 'мимо', session, clock)
-    expect(session.dialogue).toHaveLength(2)
-  })
-
-  it('незаполненное поле сверку не проходит', () => {
-    // у операционного директора нет руководителя
-    const r = verifyIdentity(world, 'd.mbeki', 'manager', '', session, clock)
-    expect(r.ok).toBe(false)
-    expect(r.error).toContain('не заполнено')
-    expect(session.flags.identityVerified).toBe(false)
-  })
-
-  it('несуществующая учётка даёт ошибку', () => {
-    const r = verifyIdentity(world, 'нет.такого', 'manager', 'кто-то', session, clock)
-    expect(r.ok).toBe(false)
-    expect(r.error).toContain('не найдена')
-  })
-
-  it('возвращает ожидаемый ответ для разбора', () => {
-    const r = verifyIdentity(world, 'p.raman', 'office', 'мимо', session, clock)
-    expect(r.expected).toBe('3-14')
-  })
-})
-
-describe('isVerifiedFor', () => {
-  it('верно для сверенного', () => {
-    verifyIdentity(world, 'p.raman', 'manager', 'Elena Varga', session, clock)
-    expect(isVerifiedFor(session, 'p.raman')).toBe(true)
-  })
-
-  it('неверно для другого человека', () => {
-    verifyIdentity(world, 'p.raman', 'manager', 'Elena Varga', session, clock)
-    expect(isVerifiedFor(session, 's.okafor')).toBe(false)
-  })
-
-  it('не зависит от регистра логина', () => {
     verifyIdentity(world, 'p.raman', 'manager', 'Elena Varga', session, clock)
     expect(isVerifiedFor(session, 'P.Raman')).toBe(true)
-  })
-
-  it('неверно без сверки вообще', () => {
-    expect(isVerifiedFor(session, 'p.raman')).toBe(false)
-  })
-})
-
-/** Сверка и операции связаны: одно влияет на другое через шлюз. */
-describe('сверка открывает операции над тем же аккаунтом', () => {
-  it('после верной сверки сброс пароля санкционирован', () => {
-    verifyIdentity(world, 'p.raman', 'manager', 'Elena Varga', session, clock)
-    const r = resetPassword(world, 'p.raman', session, clock)
-    expect(r.flagged).toBe(false)
-  })
-
-  it('после неверной сверки сброс остаётся инцидентом', () => {
-    verifyIdentity(world, 'p.raman', 'manager', 'мимо', session, clock)
-    const r = resetPassword(world, 'p.raman', session, clock)
-    expect(r.flagged).toBe(true)
-  })
-
-  it('сверка одного не открывает операции над другим', () => {
-    verifyIdentity(world, 'p.raman', 'manager', 'Elena Varga', session, clock)
-    const r = resetPassword(world, 's.okafor', session, clock)
-    expect(r.flagged).toBe(true)
+    expect(isVerifiedFor(session, 's.okafor')).toBe(false)
+    expect(resetPassword(world, 'p.raman', session, clock).flagged).toBe(false)
+    expect(resetPassword(world, 's.okafor', session, clock).flagged).toBe(true)
   })
 })

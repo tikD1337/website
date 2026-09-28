@@ -12,7 +12,7 @@ import type { Scenario } from '../core/scenario/types'
  * Релей на порту отвалился **в момент загрузки** и уже работает —
  * поэтому правильный исход «решено», а не эскалация. Вариант, где
  * сервер лежит прямо сейчас, будет отдельным сценарием: движок это
- * поддерживает, инъекции достаточно добавить network.segments[0]
+ * поддерживает, инъекции достаточно добавить network.segments[vlan=vlan20]
  * .dhcpHealthy = false.
  */
 export const apipaNoLease: Scenario = {
@@ -217,4 +217,8 @@ export const apipaNoLease: Scenario = {
   ],
 
   expectedResolution: 'solved',
+
+  // Лечится только живой ретрансляцией в VLAN 20: с тикетом, который её
+  // ломает, в одной смене не встречается.
+  resources: ['dhcp:vlan20'],
 }

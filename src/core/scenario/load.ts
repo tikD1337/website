@@ -39,6 +39,23 @@ function assertObjectivesProvable(s: Scenario): void {
   }
 }
 
+/**
+ * Проверяет библиотеку целиком, ничего не ломая.
+ *
+ * Стор ломает мир по мере входа тикетов в окно смены, а опечатка автора
+ * сценария обязана падать при запуске, а не когда до сценария дойдёт
+ * очередь через три закрытых тикета.
+ */
+export function validateScenarios(list: Scenario[]): void {
+  for (const s of list) {
+    assertObjectivesProvable(s)
+    // Патчи прогоняются на черновом мире: нерабочий путь падает громко.
+    const scratch = createWorld()
+    applyInject(scratch, s.inject)
+    applyInject(scratch, s.onEscalate ?? [])
+  }
+}
+
 function makeTicket(s: Scenario): Ticket {
   return buildTicket(s)
 }

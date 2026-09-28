@@ -1,0 +1,25 @@
+/*
+  Worker «website» в Cloudflare собирается из этого репозитория (Workers
+  Builds) на каждый пуш: master выкладывается, остальные ветки получают
+  предварительную версию.
+
+  Без этого файла wrangler настраивал проект сам и падал на каждом
+  коммите: автонастройка требует Vite 6, а имя Worker'а бралось из
+  package.json («helpdesk-sim») и не совпадало с «website». Тренажёр —
+  статика, поэтому Worker только раздаёт собранный `dist`. Сборка
+  записана здесь же: `dist` не в репозитории, и выкладка не должна
+  зависеть от того, задана ли команда сборки в панели Cloudflare.
+
+  Выкладку на sysadmin.fun (`wrangler pages deploy`) файл не трогает:
+  без `pages_build_output_dir` Pages его пропускает с предупреждением.
+*/
+{
+  "name": "website",
+  "compatibility_date": "2026-09-01",
+  "build": {
+    "command": "npm run build"
+  },
+  "assets": {
+    "directory": "./dist"
+  }
+}

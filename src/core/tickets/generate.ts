@@ -1,6 +1,8 @@
 import type { Ticket } from './types'
 import { buildTicket } from '../scenario/load'
 import type { Scenario } from '../scenario/types'
+import { applyInject } from '../world/world'
+import type { WorldState } from '../world/types'
 
 /**
  * Пул экземпляров и окно смены.
@@ -24,6 +26,11 @@ import type { Scenario } from '../scenario/types'
  * - **Пул может исчерпаться, и об этом говорится прямо.** Смена
  *   заканчивается после того, как пул опустел до конца: молчаливое
  *   «очередь пуста и больше не будет» читалось бы как поломка.
+ * - **Поломка случается, когда тикет входит в окно, и один раз.**
+ *   Пока экземпляр ждёт в пуле, его машина исправна: иначе правило
+ *   «одна поломка на машину» держалось бы только в очереди, а в мире
+ *   две поломки уже ломали бы друг друга. Скрытый и вернувшийся тикет
+ *   не ломает машину заново — начатая починка не откатывается.
  */
 
 
@@ -34,6 +41,8 @@ export interface QueueGeneratorState {
   tickets: Ticket[]
   /** было ли объявлено, что пул исчерпан */
   exhausted: boolean
+  /** экземпляры, чья поломка уже внесена в мир этой смены */
+  injected: string[]
   /** сколько тикетов занимает окно смены */
   window: number
 }
@@ -44,19 +53,21 @@ export function createQueueGenerator(
   scenarioIds: string[],
   window = SHIFT_WINDOW,
 ): QueueGeneratorState {
-  return { pool: [...scenarioIds], tickets: [], exhausted: false, window }
+  return { pool: [...scenarioIds], tickets: [], exhausted: false, injected: [], window }
 }
 
 /**
- * Наполняет очередь до окна смены.
+ * Наполняет очередь до окна смены и ломает мир по вошедшим тикетам.
  *
  * Ведёт собственное состояние; стор зовёт его после каждого закрытия
- * или скрытия тикета. Держит в очереди столько тикетов, сколько можно
- * взять подряд, не спрашивая у сценариев ничего, кроме id.
+ * или скрытия тикета. Мир — обязательный аргумент, а не отдельный шаг:
+ * вход тикета в окно и поломка машины — одно событие, и вызывающий не
+ * должен иметь возможности сделать одно без другого.
  */
 export function fillQueue(
   g: QueueGeneratorState,
   scenarios: Scenario[],
+  world: WorldState,
 ): void {
   // Закрытые тикеты покидают окно: их место освободилось для новых.
   g.tickets = g.tickets.filter(t => t.status !== 'completed')
@@ -72,7 +83,16 @@ export function fillQueue(
     в пуле и приходят, когда машина освободится: откладывание — не
     потеря.
   */
-  const busyDevices = new Set(g.tickets.map(t => t.device))
+  /*
+    Занята не только машина, но и общий ресурс (`resources` сценария):
+    два сценария на одной ретрансляции ломали бы друг друга так же,
+    как два сценария на одной машине.
+  */
+  const claims = (sc: Scenario) => [`device:${sc.device}`, ...(sc.resources ?? [])]
+  const busy = new Set(g.tickets.flatMap(t => {
+    const sc = scenarios.find(s => s.id === t.scenarioId)
+    return sc ? claims(sc) : [`device:${t.device}`]
+  }))
   const waiting: string[] = []
 
   while (g.tickets.length < g.window && g.pool.length > 0) {
@@ -81,13 +101,27 @@ export function fillQueue(
     // Экземпляр без сценария — мусор в пуле, а не отложенное дело.
     if (!sc) continue
 
-    if (busyDevices.has(sc.device)) {
+    if (claims(sc).some(c => busy.has(c))) {
       waiting.push(id)
       continue
     }
 
-    busyDevices.add(sc.device)
+    for (const c of claims(sc)) busy.add(c)
     g.tickets.push(buildTicket(sc))
+
+    /*
+      Поломка вносится при входе в окно, а не при старте смены.
+
+      Раньше мир ломался сразу по всей библиотеке, и откладывание
+      экземпляра на занятой машине защищало только очередь: в мире
+      обе поломки уже сидели на одной машине. Сегодня машины у всех
+      сценариев разные, и дефект не виден; с вариантами сценариев в
+      срезе 8 он выстрелил бы первым же совпадением.
+    */
+    if (!g.injected.includes(id)) {
+      applyInject(world, sc.inject)
+      g.injected.push(id)
+    }
   }
 
   // Отложенные возвращаются в начало: они ждали дольше остальных.

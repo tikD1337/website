@@ -106,6 +106,9 @@ const SCOPE_FALLBACKS = [
   'Честно, не обращала внимания — я только про себя говорю.',
 ]
 
+/** Ответ заявителя на сообщение о передаче — и в разговоре, и по кнопке. */
+export const HANDOFF_REPLY = 'Хорошо, спасибо, буду ждать. Сообщите, когда заработает?'
+
 /**
  * Ответ на реплику техника из заготовок сценария.
  *
@@ -122,6 +125,13 @@ export function scriptedReply(req: DialogueRequest): DialogueReply {
     const [good, bad] = brief.confirmReplies
     return { text: brief.problemGone ? good : bad, source: 'scripted' }
   }
+
+  /*
+    Передача — не починка. Заявитель соглашается ждать и ничего не
+    подтверждает: иначе реплика «передаю сетевой группе» закрывала бы
+    цель подтверждения.
+  */
+  if (intent === 'handoff') return { text: HANDOFF_REPLY, source: 'scripted' }
 
   const best = bestMatch(brief, said)
   if (best) return { text: best, source: 'scripted' }

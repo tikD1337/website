@@ -13,6 +13,7 @@ import type { SilentFaultCheck } from './types'
 /** Выполнено ли условие в этом мире. */
 export function checkHolds(world: unknown, check: SilentFaultCheck): boolean {
   if (check.anyOf) return check.anyOf.some(c => checkHolds(world, c))
+  if ('exists' in check) return existsHolds(world, check.path, check.exists === true)
 
   const value = getPath(world, check.path)
 
@@ -42,6 +43,22 @@ export function checkHolds(world: unknown, check: SilentFaultCheck): boolean {
     поэтому падаем громко, как и `setPath` на неверном пути.
   */
   throw new Error(`условие без предиката: ${check.path}`)
+}
+
+/**
+ * `exists`: путь обязан кончаться выбором по полю, а массив, из которого
+ * выбирают, — существовать. Иначе опечатка в имени массива выглядела бы
+ * как «не нашлось», и сценарий молча становился бы непроходимым.
+ */
+function existsHolds(world: unknown, path: string, want: boolean): boolean {
+  const open = path.lastIndexOf('[')
+  if (!path.endsWith(']') || open === -1 || !path.slice(open).includes('=')) {
+    throw new Error(`exists допустим только для выбора по полю: ${path}`)
+  }
+  if (!Array.isArray(getPath(world, path.slice(0, open)))) {
+    throw new Error(`условие ссылается на несуществующий путь: ${path}`)
+  }
+  return (getPath(world, path) !== undefined) === want
 }
 
 export function allHold(world: unknown, checks: SilentFaultCheck[]): boolean {

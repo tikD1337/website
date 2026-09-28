@@ -36,7 +36,8 @@ export function claim(q: QueueState, number: string, clock: Clock): void {
   const t = findTicket(q, number)
   if (t.status === 'completed') throw new Error('тикет уже закрыт')
 
-  t.status = 'assigned'
+  // Статус начатого тикета при повторном взятии не теряется: «ждём поставку» остаётся собой.
+  if (t.status === 'new') t.status = 'assigned'
   t.createdAt ??= clock.now().toISOString()
   q.assigned = number
 }
@@ -64,4 +65,22 @@ export function unassign(q: QueueState, number: string): void {
   const t = requireMine(q, number)
   t.status = 'new'
   q.assigned = null
+}
+
+/**
+ * «Ждём поставку»: тикет отпускает слот.
+ *
+ * Пока курьер везёт замену, техник берёт следующий тикет. Правило «один
+ * в работе» не нарушается — ждущий тикет в работе не числится.
+ */
+export function park(q: QueueState, number: string): void {
+  const t = requireMine(q, number)
+  t.status = 'pending-shipment'
+  q.assigned = null
+}
+
+/** Доставка возвращает ждущий тикет в работу; любой другой статус не трогает. */
+export function resume(q: QueueState, number: string): void {
+  const t = findTicket(q, number)
+  if (t.status === 'pending-shipment') t.status = 'in-progress'
 }
