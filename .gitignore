@@ -29,3 +29,6 @@ AfterDark-*.zip
 
 # артефакт инкрементальной сборки tsc -b
 tsconfig.tsbuildinfo
+
+# кэш wrangler
+.wrangler/
