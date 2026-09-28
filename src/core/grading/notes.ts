@@ -141,6 +141,8 @@ export function gradeNote(
     'членство в группах', 'членстве в группах', 'состав группы',
     'последний вход', 'последнем входе', 'счётчик неудачных',
     'билет', 'группе доступа', 'группу доступа',
+    // Срез 6Б: учёт оборудования — проверка гарантии в карточке актива.
+    'cmdb', 'карточке актива', 'гаранти',
   ]
   const namedGui = GUI_EVIDENCE.filter(g => n.includes(g))
   const evidenceCount = namedCommands.length + namedGui.length

@@ -19,9 +19,11 @@ import type { FetchLike } from './core/dialogue/openai'
  * Сценарий ставится первым: сетевые сценарии делят общий ресурс и в
  * окне не встречаются, и без этого нужный мог бы ждать в пуле.
  */
+let elapsed = 0
 const play = (scenarioId: string, iso: string, fetch?: FetchLike) => {
+  elapsed = 0
   const library = [...SCENARIOS].sort((a, b) => Number(b.id === scenarioId) - Number(a.id === scenarioId))
-  const g = createGameStore({ now: () => new Date(iso) }, fetch ? { fetch } : undefined,
+  const g = createGameStore({ now: () => new Date(Date.parse(iso) + elapsed) }, fetch ? { fetch } : undefined,
     SCENARIOS.length, library)
   const s = () => g.getState()
   s().claimTicket(s().queue.tickets.find(t => t.scenarioId === scenarioId)!.number)
@@ -39,6 +41,12 @@ const close = (s: S, note: string, code: 'solved' | 'escalate' = 'solved') => {
 const unmet = (s: S) => s().scorecard!.objectives.filter(o => !o.met).map(o => o.id)
 const dim = (s: S, id: string) => s().scorecard!.dimensions.find(d => d.id === id)!
 const printed = (s: S) => s().terminalLines.map(l => l.text).join('\n')
+/** Часы уходят вперёд, и стор тикает — как интерфейс раз в секунду. */
+const wait = (s: S, seconds: number) => {
+  elapsed += seconds * 1000
+  s().tick()
+}
+const asset = (s: S, tag: string) => s().world.cmdb.find(a => a.tag === tag)!
 const cli = (s: S, sw: string, ...lines: string[]) => {
   for (const l of lines) s().runSwitchCommand(sw, l)
   return s().consoles[sw]!.lines.map(l => l.text).join('\n')
@@ -512,6 +520,125 @@ describe('пропавшая ретрансляция', () => {
     s().informRequester()
     const card = close(s, NOTE, 'escalate')
     expect(dim(s, 'authority').score).toBe(0)
+    expect(card.verdict).toBe('fail')
+  })
+})
+
+describe('док-станция на гарантии', () => {
+  const at = '2026-09-28T10:00:00.000Z'
+  const NOTE = 'Elena Varga сообщила, что мониторы и мышь через док-станцию не работают, сам '
+    + 'ноутбук работает. В диспетчере устройств у Halyard D6000 USB-C Dock ошибка Code 43. '
+    + 'Попросил переподключить кабель дока — не помогло, версию с контактом исключил. В карточке '
+    + 'актива CMDB у дока AL-P2031 гарантия до 2027-03-10. Оформил замену SHP-1041: док AL-P2040 '
+    + 'со склада на стол 3-20, после доставки заявительница подтвердила, что мониторы работают. '
+    + 'Старый док AL-P2031 отправлен вендору по гарантии. При повторении проверить кабель USB-C.'
+  const investigate = (s: S) => {
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    s().openApp('devmgmt')
+    s().askRequesterTo('reseat')
+    s().inspectObject('asset', 'AL-P2031')
+  }
+
+  /*
+    Замену везёт курьер: тикет ждёт поставку, отпускает слот и
+    возвращается с журналом. Всё выясненное до отправки остаётся в оценке.
+  */
+  it('образцовый проход: Code 43, гарантия, замена со склада, ожидание, RMA старого — full', () => {
+    const s = play('hw-dock-failed', at)
+    const number = s().queue.assigned!
+    investigate(s)
+    expect(s().createShipment({ type: 'dock-monitor-swap', assetTag: 'AL-P2040' }))
+      .toEqual({ ok: true, id: 'SHP-1041', flagged: false })
+    expect(s().waitForShipment()).toEqual({ ok: true })
+    wait(s, 90)
+    s().claimTicket(number)
+    s().confirmWithUser()
+    s().createShipment({ type: 'vendor-rma', assetTag: 'AL-P2031' })
+    const card = close(s, NOTE)
+
+    expect(unmet(s)).toEqual([])
+    expect(card.silentFaults).toEqual([])
+    expect(card.note.parts.filter(p => !p.earned).map(p => p.id)).toEqual([])
+    expect(card.dimensions.filter(d => d.score < 10).map(d => `${d.id}=${d.score}`)).toEqual([])
+    expect(card.verdict).toBe('full')
+  })
+
+  it('утилизация дока на гарантии — флаг шлюза, вердикт fail', () => {
+    const s = play('hw-dock-failed', at)
+    investigate(s)
+    s().createShipment({ type: 'dock-monitor-swap', assetTag: 'AL-P2040' })
+    wait(s, 90)
+    s().confirmWithUser()
+    expect(s().createShipment({ type: 'disposal', assetTag: 'AL-P2031' })).toMatchObject({ ok: true, flagged: true })
+    const card = close(s, NOTE)
+    expect(dim(s, 'authority').score).toBe(0)
+    expect(card.verdict).toBe('fail')
+  })
+
+  /*
+    Закрыть до доставки можно, но заявительница честно скажет, что замены
+    нет. И RMA старого дока раньше, чем приехал новый, — дока у машины нет
+    вовсе, условие отвечает «нет», а не падает.
+  */
+  it('до доставки подтверждения нет; ранний RMA старого дока ничего не ломает', () => {
+    const s = play('hw-dock-failed', at)
+    investigate(s)
+    s().createShipment({ type: 'vendor-rma', assetTag: 'AL-P2031' })
+    s().createShipment({ type: 'dock-monitor-swap', assetTag: 'AL-P2040' })
+    expect(() => s().confirmWithUser()).not.toThrow()
+    expect(s().session.flags.userConfirmed).toBe(false)
+    const early = close(s, NOTE)
+    expect(early.verdict).not.toBe('full')
+
+    wait(s, 90)
+    expect(asset(s, 'AL-P2040').attachedTo).toBe('AL-LPT-0512')
+  })
+})
+
+describe('изношенная гарнитура', () => {
+  const at = '2026-09-28T10:00:00.000Z'
+  const NOTE = 'Sam Okafor сообщил, что гарнитура трещит и пропадает микрофон, если пошевелить '
+    + 'провод. В диспетчере устройств Halyard H340 USB Headset исправна — драйвер исключил. '
+    + 'Попросил подключить в другой порт — не помогло. В карточке актива CMDB гарнитура AL-P3017: '
+    + 'гарантия истекла 2025-02-01. Оформил гарнитуру на стол SHP-1041: AL-P3030 со склада, после '
+    + 'доставки заявитель подтвердил, что звук чистый. Старую AL-P3017 отправил в утилизацию. '
+    + 'При повторении сначала проверять гарантию.'
+  const replace = (s: S) => {
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    s().openApp('devmgmt')
+    s().askRequesterTo('other-port')
+    s().inspectObject('asset', 'AL-P3017')
+    s().createShipment({ type: 'headset-to-desk', assetTag: 'AL-P3030' })
+    wait(s, 90)
+    s().confirmWithUser()
+  }
+
+  it('образцовый проход: драйвер исправен, гарантия истекла, замена и утилизация — full', () => {
+    const s = play('hw-headset-worn', at)
+    replace(s)
+    expect(s().createShipment({ type: 'disposal', assetTag: 'AL-P3017' })).toMatchObject({ ok: true, flagged: false })
+    const card = close(s, NOTE)
+    expect(unmet(s)).toEqual([])
+    expect(card.silentFaults).toEqual([])
+    expect(card.dimensions.filter(d => d.score < 10).map(d => `${d.id}=${d.score}`)).toEqual([])
+    expect(card.verdict).toBe('full')
+  })
+
+  /*
+    Ловушка: RMA без гарантии. Вендор отклоняет, гарнитура возвращается
+    на склад неисправной и числится запасом — её отправят кому-нибудь на
+    стол.
+  */
+  it('RMA без гарантии — отказ вендора, неисправное на складе, fail', () => {
+    const s = play('hw-headset-worn', at)
+    replace(s)
+    s().createShipment({ type: 'vendor-rma', assetTag: 'AL-P3017' })
+    wait(s, 141)
+    expect(asset(s, 'AL-P3017')).toMatchObject({
+      lifecycle: 'in-stock', condition: 'faulty', note: 'Отклонено вендором: гарантия истекла',
+    })
+    const card = close(s, NOTE)
+    expect(card.silentFaults).toEqual([expect.stringContaining('запасом')])
     expect(card.verdict).toBe('fail')
   })
 })

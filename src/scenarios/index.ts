@@ -4,6 +4,8 @@ import { identityAccountLockout } from './identity-account-lockout'
 import { identityShareAccess } from './identity-share-access'
 import { wrongVlanPort } from './net-wrong-vlan-port'
 import { dhcpRelayMissing } from './net-dhcp-relay-missing'
+import { hwDockFailed } from './hw-dock-failed'
+import { hwHeadsetWorn } from './hw-headset-worn'
 import type { Scenario } from '../core/scenario/types'
 
 /**
@@ -19,6 +21,8 @@ export const SCENARIOS: Scenario[] = [
   identityShareAccess,
   wrongVlanPort,
   dhcpRelayMissing,
+  hwDockFailed,
+  hwHeadsetWorn,
 ]
 
 export function scenarioFor(id: string): Scenario {
