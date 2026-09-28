@@ -78,5 +78,27 @@ describe('разбор прочитанного из хранилища', () => 
     expect(codes({ ...old, kb: [{ ...article, title: '' }] })).toEqual(['bad_article'])
     expect(codes({ ...old, kb: [{ ...article, status: 'lost' }] })).toEqual(['bad_article'])
     expect(codes({ ...old, kb: [null] })).toEqual(['bad_article'])
+
+    /*
+      Регрессия из обзора среза 6В: проверка смотрела только, что
+      `sources` и `history` — массивы. `sources: [{}]` проходил и ронял
+      «Документацию» (объект не рисуется текстом), `history: [null]` —
+      на `v.version`; статья без даты правки показывала «NaN.NaN.NaN».
+    */
+    const version = { version: 1, at: '2026-09-28T10:00:00.000Z', title: 'Было', type: 'sop', body: 'текст' }
+    expect(codes({ ...old, kb: [{ ...article, sources: ['SH-1:INC1'], history: [version] }] }), 'целая').toEqual([])
+    const broken: Array<[string, object]> = [
+      ['источник не строка', { sources: [{}] }],
+      ['версия null', { history: [null] }],
+      ['версия без номера', { history: [{ ...version, version: '1' }] }],
+      ['версия без текста', { history: [{ ...version, body: undefined }] }],
+      ['версия чужого типа', { history: [{ ...version, type: 'wiki' }] }],
+      ['без даты правки', { updatedAt: undefined }],
+      ['без категории', { category: 7 }],
+      ['без кода закрытия', { resolutionCode: '' }],
+    ]
+    for (const [name, patch] of broken) {
+      expect(codes({ ...old, kb: [{ ...article, ...patch }] }), name).toEqual(['bad_article'])
+    }
   })
 })

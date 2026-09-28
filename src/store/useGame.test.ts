@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createGameStore } from './useGame'
 import { saveProgress } from '../core/progress/db'
+import { validateProgress } from '../core/progress/validate'
 
 // Хранилище настоящее, кроме записи: её нужно видеть, а не выполнять.
 vi.mock('../core/progress/db', async (original) => ({
@@ -526,7 +527,11 @@ describe('база знаний', () => {
     expect(s().editArticle('KB-0001', { body: 'Сначала release, потом renew.' })).toMatchObject({ ok: true })
     expect(s().setArticleStatus('KB-0001', 'published')).toMatchObject({ ok: true })
     expect(s().progress.kb[0]).toMatchObject({ version: 2, status: 'published', body: 'Сначала release, потом renew.' })
-    expect(vi.mocked(saveProgress).mock.calls.at(-1)![0].kb[0]).toMatchObject({ version: 2, status: 'published' })
+    const saved = vi.mocked(saveProgress).mock.calls.at(-1)![0]
+    expect(saved.kb[0]).toMatchObject({ version: 2, status: 'published' })
+    // Запись проверяется перед сохранением и молча не пишется, если проверка
+    // не прошла: статья с историей версий обязана её проходить.
+    expect(validateProgress(saved)).toEqual([])
 
     expect(s().editArticle('KB-9999', { body: 'x' })).toEqual({ ok: false, error: 'статья KB-9999 не найдена' })
     s().claimTicket(nextOpen().number)

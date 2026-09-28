@@ -95,17 +95,36 @@ export function validateProgress(raw: unknown): ValidationError[] {
 const KB_TYPES = ['sop', 'runbook', 'network', 'ad', 'known-issue', 'vendor', 'diagnostics']
 const KB_STATUSES = ['draft', 'published', 'retired']
 
+const isString = (v: unknown): v is string => typeof v === 'string'
+
+/*
+  Статья проверяется до последнего поля, которое читает интерфейс:
+  «массив» без проверки элементов пропускал `sources: [{}]` и
+  `history: [null]`, и «Документация» падала на рендере.
+*/
+function isVersion(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null) return false
+  const v = raw as Record<string, unknown>
+  return typeof v['version'] === 'number'
+    && isString(v['at']) && isString(v['title']) && isString(v['body'])
+    && KB_TYPES.includes(v['type'] as string)
+}
+
 function isArticle(raw: unknown): boolean {
   if (typeof raw !== 'object' || raw === null) return false
   const a = raw as Record<string, unknown>
-  return typeof a['id'] === 'string' && a['id'] !== ''
-    && typeof a['scenarioId'] === 'string' && a['scenarioId'] !== ''
-    && typeof a['title'] === 'string' && a['title'] !== ''
-    && typeof a['body'] === 'string'
+  return isString(a['id']) && a['id'] !== ''
+    && isString(a['scenarioId']) && a['scenarioId'] !== ''
+    && isString(a['title']) && a['title'] !== ''
+    && isString(a['body'])
     && KB_TYPES.includes(a['type'] as string)
     && KB_STATUSES.includes(a['status'] as string)
     && typeof a['version'] === 'number' && a['version'] >= 1
-    && Array.isArray(a['sources']) && Array.isArray(a['history'])
+    && isString(a['category']) && isString(a['subcategory'])
+    && isString(a['resolutionCode']) && a['resolutionCode'] !== ''
+    && isString(a['createdAt']) && isString(a['updatedAt'])
+    && Array.isArray(a['sources']) && a['sources'].every(isString)
+    && Array.isArray(a['history']) && a['history'].every(isVersion)
 }
 
 /** Проверенный прогресс прошлого формата получает пустую базу знаний. */
