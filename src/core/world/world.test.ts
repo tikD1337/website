@@ -95,6 +95,32 @@ describe('стартовая сеть', () => {
   })
 })
 
+/*
+  Учёт оборудования — по нему выбирают замену и решают про гарантию.
+  Машина без записи или два актива с одним тегом — это логистика,
+  которая отправит не то и не туда.
+*/
+describe('стартовый учёт', () => {
+  it('CMDB: у каждой машины есть актив, теги не повторяются, склад на месте', () => {
+    const w = createWorld()
+    for (const [host, d] of Object.entries(w.devices)) {
+      expect(w.cmdb.find(a => a.hostname === host)?.tag, host).toBe(d.assetTag)
+    }
+    const tags = w.cmdb.map(a => a.tag)
+    expect(new Set(tags).size).toBe(tags.length)
+    expect(w.cmdb.filter(a => a.lifecycle === 'in-stock').map(a => a.tag)).toEqual([
+      'AL-P2040', 'AL-P2041', 'AL-P2110', 'AL-P3030', 'AL-P3031', 'AL-P3032',
+      'AL-P5001', 'AL-L9001', 'AL-L9002', 'AL-L9003',
+    ])
+    expect(w.cmdb.find(a => a.tag === 'AL-P2031')).toEqual({
+      tag: 'AL-P2031', kind: 'dock', vendor: 'Halyard', model: 'D6000 USB-C Dock', serial: 'HA2031K7',
+      owner: 'e.varga', lifecycle: 'in-use', location: 'Стол 3-20',
+      purchased: '2025-03-10', warrantyUntil: '2027-03-10',
+      hostname: '', attachedTo: 'AL-LPT-0512', condition: 'ok', note: '',
+    })
+  })
+})
+
 describe('инъекция поломки', () => {
   it('ломает мир по списку путей, не задевая соседей, и падает на опечатке', () => {
     const w = createWorld()

@@ -1,6 +1,7 @@
 import { BRAND } from '../../brand'
 import { DOMAIN, seedOus, seedGroups, seedUsers, seedShares } from './seed-directory'
 import { seedNetwork } from './seed-network'
+import { seedCmdb } from './seed-cmdb'
 import type {
   WorldState, Service, EventEntry, DeviceProcess, Driver, Disk, Adapter, Device,
 } from './types'
@@ -329,12 +330,13 @@ function seedDevices(): Record<string, Device> {
 export function seedWorld(): WorldState {
   const devices = seedDevices()
   const { segments, ...rest } = seedNetwork(devices)
+  const users = seedUsers()
   return {
     org: {
       domain: DOMAIN,
       ous: seedOus(),
       groups: seedGroups(),
-      users: seedUsers(),
+      users,
       shares: seedShares(),
     },
 
@@ -359,5 +361,8 @@ export function seedWorld(): WorldState {
       publicHosts: ['8.8.8.8', '1.1.1.1'],
       ...rest,
     },
+
+    cmdb: seedCmdb(devices, rest, users),
+    shipments: [],
   }
 }

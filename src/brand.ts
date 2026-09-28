@@ -38,5 +38,6 @@ export const BRAND = {
     network: ['Ferrix'],
     printer: ['Kiyomi'],
     peripheral: ['Halyard'],
+    phone: ['Bramble'],
   },
 } as const
