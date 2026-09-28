@@ -831,6 +831,25 @@ table.journal td.data { white-space: nowrap; }
 
 .work-notes { white-space: pre-line; }
 
+/* ── база знаний ─────────────────────────────────────────── */
+
+/* Заметка пишется абзацами, и статья обязана их сохранить. */
+.kb-body { white-space: pre-line; overflow-wrap: anywhere; }
+
+.kb-title { flex: 1 1 30ch; min-width: 0; max-width: 60ch; }
+
+/* Номер статьи — одно слово: на 900 пикселях «KB-/0001» переносился. */
+.kb-list td.data { white-space: nowrap; }
+
+/* Текст статьи отделён от метаданных: на снимке он начинался впритык к «Из тикетов». */
+.kv + .kb-body { margin-top: 14px; }
+
+.kb-history { margin-top: 18px; }
+.kb-history h3 { margin: 0 0 10px; font-size: 12px; font-weight: 600; color: var(--dim); }
+.kb-history details { margin: 0 0 8px; }
+.kb-history summary { cursor: pointer; font-size: 13px; color: var(--dim); }
+.kb-history details .kb-body { margin: 6px 0 0 14px; }
+
 /* ── панель задач ────────────────────────────────────────── */
 
 .taskbar {

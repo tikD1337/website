@@ -8,6 +8,8 @@ import {
   FIELD_QUESTION, FIELD_LABEL, type VerificationField,
 } from '../core/directory/identity'
 import { SHIPMENT_TYPES } from '../core/logistics/types'
+import { relatedTo } from '../core/kb/search'
+import { TYPE_LABEL, STATUS_LABEL } from '../core/kb/types'
 
 const FIELDS = Object.keys(FIELD_QUESTION) as VerificationField[]
 
@@ -43,6 +45,8 @@ export function TicketView() {
   const setTicketStatus = useGame(s => s.setTicketStatus)
   const setTool = useGame(s => s.setTool)
   const waitForShipment = useGame(s => s.waitForShipment)
+  const kb = useGame(s => s.progress.kb)
+  const openArticle = useGame(s => s.openArticle)
   const [waitError, setWaitError] = useState<string | null>(null)
 
   const ticket = queue.tickets.find(t => t.number === queue.assigned)
@@ -67,6 +71,7 @@ export function TicketView() {
 
   const user = world.org.users.find(u => u.samAccountName === ticket.requester)
   const shipments = world.shipments.filter(x => x.ticket === ticket.number)
+  const related = relatedTo(kb, ticket)
   const canResolve = ticket.resolutionCode !== null
   /*
     Показываем только те просьбы, которые техник уже заслужил
@@ -94,6 +99,35 @@ export function TicketView() {
           {user?.displayName}, {user?.title}, {user?.dept}
         </p>
       </div>
+
+      {/*
+        Свои статьи по той же проблеме. База пишется закрытыми тикетами,
+        и увидеть здесь собственную заметку прошлой смены — законный
+        приём: баллов он не даёт и не отнимает.
+      */}
+      {related.length > 0 && (
+        <div className="section">
+          <h2>База знаний</h2>
+          <table>
+            <thead>
+              <tr><th>Номер</th><th>Заголовок</th><th>Тип</th><th>Статус</th><th /></tr>
+            </thead>
+            <tbody>
+              {related.map(a => (
+                <tr key={a.id}>
+                  <td className="data">{a.id}</td>
+                  <td>{a.title}</td>
+                  <td>{TYPE_LABEL[a.type]}</td>
+                  <td>{STATUS_LABEL[a.status]}</td>
+                  <td>
+                    <button className="act" type="button" onClick={() => openArticle(a.id)}>Открыть</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/*
         Сверка личности — настоящая проверка, а не кнопка «я подтвердил».

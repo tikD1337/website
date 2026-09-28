@@ -79,6 +79,8 @@ export function ScorecardView() {
   const closeViewing = useGame(s => s.closeViewing)
   const setTool = useGame(s => s.setTool)
   const reset = useGame(s => s.reset)
+  const lastDraft = useGame(s => s.lastDraft)
+  const openArticle = useGame(s => s.openArticle)
 
   // Разбор из истории подменяет свежий: это то же самое прохождение,
   // открытое задним числом, а не второй экран.
@@ -110,6 +112,23 @@ export function ScorecardView() {
       </div>
 
       <CardBody card={shown} />
+
+      {/* Статья принадлежит свежему закрытию: у разбора из истории её строки нет. */}
+      {!viewing && lastDraft && (
+        <div className="section">
+          <h2>База знаний</h2>
+          <div className="bar">
+            <p className="prose">
+              {lastDraft.created
+                ? `Черновик статьи ${lastDraft.id} создан из вашей заметки.`
+                : `Тикет добавлен к статье ${lastDraft.id}.`}
+            </p>
+            <button className="act" type="button" onClick={() => openArticle(lastDraft.id)}>
+              Открыть статью
+            </button>
+          </div>
+        </div>
+      )}
 
       {viewing && (
         <div className="section">

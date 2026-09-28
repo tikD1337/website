@@ -7,6 +7,7 @@ import { DirectoryConsole } from './apps/DirectoryConsole'
 import { ServerRoom } from './ServerRoom'
 import { AssetsView } from './AssetsView'
 import { LogisticsView } from './LogisticsView'
+import { KnowledgeView } from './KnowledgeView'
 import { CommsView } from './CommsView'
 import { SettingsView } from './SettingsView'
 import { ScorecardView } from './ScorecardView'
@@ -23,6 +24,7 @@ const TOOLS: Array<{ id: Tool; label: string }> = [
   { id: 'serverroom', label: 'Серверная' },
   { id: 'assets', label: 'Активы' },
   { id: 'logistics', label: 'Логистика' },
+  { id: 'kb', label: 'Документация' },
   { id: 'scorecard', label: 'Разбор' },
   { id: 'history', label: 'История' },
   { id: 'profile', label: 'Профиль' },
@@ -64,6 +66,7 @@ export function Shell() {
         {tool === 'serverroom' && <ServerRoom />}
         {tool === 'assets' && <AssetsView />}
         {tool === 'logistics' && <LogisticsView />}
+        {tool === 'kb' && <KnowledgeView />}
         {tool === 'scorecard' && <ScorecardView />}
         {tool === 'history' && <HistoryView />}
         {tool === 'profile' && <ProfileView />}
