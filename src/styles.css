@@ -1071,6 +1071,42 @@ tr.locked td { color: var(--faint); }
   max-width: 66ch;
 }
 
+/* ── интервью ────────────────────────────────────────────── */
+
+/*
+  Этапы — последовательность, поэтому номера. Текущий выделен
+  насыщенностью, пройденные приглушены, будущие — ещё сильнее: цвет
+  здесь не судит, поэтому его нет.
+*/
+/*
+  Номер — внутри пункта: у гибкого списка маркер снаружи налезал на
+  соседний этап, и полоса читалась «Знакомство2. Рабочие ситуации».
+*/
+ol.stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 22px;
+  margin: 0 0 14px;
+  padding-left: 0;
+  list-style-position: inside;
+  font-size: 12px;
+  color: var(--faint);
+}
+ol.stages li::marker { font-family: var(--mono); }
+ol.stages li.passed { color: var(--dim); }
+ol.stages li.current { color: var(--text); font-weight: 600; }
+ol.stages.static { color: var(--dim); display: block; font-size: 13px; list-style-position: outside; padding-left: 20px; }
+ol.stages.static li { margin-bottom: 2px; }
+
+.interview-feed { max-width: 78ch; }
+.interview-feed .line { grid-template-columns: 110px minmax(0, 1fr); }
+
+.answer-box { min-height: 96px; margin-top: 10px; }
+
+.points { margin: 8px 0; max-width: 90ch; }
+.expected { color: var(--dim); margin-top: 8px; }
+table.interviews td.data { white-space: nowrap; }
+
 @media (max-width: 900px) {
   .comms { grid-template-columns: minmax(0, 1fr); }
   .line { grid-template-columns: minmax(0, 1fr); gap: 2px; }

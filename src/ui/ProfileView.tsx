@@ -6,6 +6,7 @@ import { verdictSpread, bestByScenario, shiftPoints } from '../core/progress/com
 import { VERDICT } from './verdict'
 import { withPlural } from './plural'
 import { courseState } from '../core/learning/state'
+import { VERDICT_LABEL } from '../core/interview/types'
 import { formatDateTime } from './dates'
 
 /**
@@ -227,6 +228,9 @@ function LearningSection() {
   const open = useGame(s => s.openLearn)
   const states = courses.map(c => ({ course: c, st: courseState(c, learning) }))
   const badges = states.filter(x => x.st.done)
+  const interviews = useGame(s => s.progress.interviews)
+  const openInterview = useGame(s => s.openInterview)
+  const lastInterview = interviews.at(-1)
 
   return (
     <div className="section">
@@ -240,6 +244,17 @@ function LearningSection() {
           </div>
         </div>
       ))}
+      <div className="row-score">
+        <div>Интервью</div>
+        <div className={lastInterview ? `mark ${lastInterview.result.verdict === 'hire' ? 'high' : lastInterview.result.verdict === 'maybe' ? 'mid' : 'low'}` : 'mark'}>
+          {lastInterview ? VERDICT_LABEL[lastInterview.result.verdict].toLowerCase() : '—'}
+        </div>
+        <div className="note">
+          {lastInterview
+            ? `Последняя попытка ${formatDateTime(lastInterview.at)}, всего попыток: ${interviews.length}.`
+            : 'Интервью ещё не проходили.'}
+        </div>
+      </div>
       <p className="sub">
         {badges.length === 0
           ? 'Значков пока нет: значок даётся за пройденный курс.'
@@ -247,6 +262,7 @@ function LearningSection() {
       </p>
       <div className="bar">
         <button className="act" type="button" onClick={() => open(null)}>К курсам</button>
+        <button className="act" type="button" onClick={() => openInterview(null)}>К интервью</button>
       </div>
     </div>
   )
