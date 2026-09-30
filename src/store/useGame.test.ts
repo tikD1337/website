@@ -14,6 +14,7 @@ import { HANDOFF_REPLY } from '../core/dialogue/scripted'
 import type { Scenario } from '../core/scenario/types'
 import type { Answer, Check, Lesson, Section } from '../core/learning/types'
 import { firstLine } from '../courses/first-line'
+import { defaultConfig } from '../core/dialogue/types'
 
 let g: ReturnType<typeof createGameStore>
 const s = () => g.getState()
@@ -628,5 +629,64 @@ describe('курсы', () => {
     expect(s().queue.tickets.find(t => t.number === s().queue.assigned)!.scenarioId).toBe('net-apipa-no-lease')
     expect(s().parked).toEqual({})
     expect(s().learnAt).toEqual({ course: course.id, section: 'network', lesson: 'dhcp-apipa' })
+  })
+})
+
+describe('интервью', () => {
+  /** Модель, которая отвечает, когда её отпустят. */
+  const heldModel = () => {
+    let release: (text: string) => void = () => {}
+    const fetch = vi.fn(() => new Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>(resolve => {
+      release = text => resolve({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: text } }] }) })
+    }))
+    return { fetch, release: (text: string) => release(text) }
+  }
+  const withModel = (fetch: ReturnType<typeof heldModel>['fetch']) => {
+    g = createGameStore(clockAt('2026-09-30T10:00:00.000Z'), { fetch })
+    s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
+  }
+  const candidateLines = () => s().interview!.transcript.filter(l => l.speaker === 'candidate').map(l => l.text)
+
+  it('пустой ответ и ответ во время раздумий не записываются', async () => {
+    const model = heldModel()
+    withModel(model.fetch)
+    s().startInterview('first-line')
+    await s().answerInterview('   ')
+    expect(candidateLines(), 'пустой').toEqual([])
+
+    const first = s().answerInterview('Работал в поддержке на учёбе.')
+    expect(s().interviewBusy).toBe(true)
+    await s().answerInterview('Второй ответ поверх первого')
+    expect(candidateLines(), 'во время раздумий').toEqual(['Работал в поддержке на учёбе.'])
+    model.release('Спасибо, понятно.')
+    await first
+    expect(s().interviewBusy).toBe(false)
+    expect(s().interview!.transcript.at(-2)!.text).toBe('Спасибо, понятно.')
+  })
+
+  it('ответ, пришедший в брошенное интервью, отбрасывается', async () => {
+    const model = heldModel()
+    withModel(model.fetch)
+    s().startInterview('first-line')
+    const pending = s().answerInterview('Работал в поддержке на учёбе.')
+    s().startInterview('first-line')
+    const fresh = s().interview
+    model.release('Старая реакция')
+    await pending
+    expect(s().interview, 'новое интервью не тронуто').toBe(fresh)
+    expect(s().interview!.transcript.map(l => l.text)).not.toContain('Старая реакция')
+  })
+
+  it('законченное интервью записано и открыто', async () => {
+    s().startInterview('first-line')
+    while (s().interview!.stage !== 'questions') await s().answerInterview('не знаю')
+    await s().askInterviewer('Какой у вас график смен?')
+    const record = s().finishInterview()!
+
+    expect(s()).toMatchObject({ interview: null, interviewOpen: record.id, activeTool: 'interview' })
+    expect(record).toMatchObject({ track: 'first-line', attempt: 0, result: { verdict: 'no', questionsAsked: 1 } })
+    const saved = vi.mocked(saveProgress).mock.calls.at(-1)![0]
+    expect(saved.interviews).toEqual([record])
+    expect(validateProgress(saved)).toEqual([])
   })
 })

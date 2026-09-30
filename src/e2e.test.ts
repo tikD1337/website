@@ -699,3 +699,45 @@ describe('курсы', () => {
     expect(s().progress.records.map(r => r.scenarioId)).toEqual(['net-apipa-no-lease'])
   })
 })
+
+describe('интервью', () => {
+  it('без модели: от знакомства до вердикта, опыт по закрытому тикету', async () => {
+    const s = play('net-apipa-no-lease', '2026-09-30T10:00:00.000Z')
+    s().runCommand('ipconfig /all')
+    s().runCommand('ipconfig /release')
+    s().runCommand('ipconfig /renew')
+    s().confirmWithUser()
+    close(s, 'ipconfig /all показал 169.254.23.11; ipconfig /release и ipconfig /renew выдали адрес, заявитель подтвердил.')
+
+    expect(s().startInterview('first-line')).toEqual({ ok: true })
+    const answers = [
+      'Работал в поддержке на учёбе, нравится разбираться и помогать людям.',
+      'Это значит, что DHCP не ответил.',
+      'Сначала ipconfig /release, потом /renew; если снова — смотрю порт и VLAN.',
+      'Сверю личность контрольным вопросом, разблокирую учётку и найду источник в журнале — обычно телефон со старым паролем.',
+      'Откажу: пароль меняю только владельцу после сверки личности; если нужны данные — через руководителя выдать доступ.',
+      'Добавлю в группу отдела, попрошу выйти и войти заново, проверю whoami /groups и что папка открывается.',
+      'Сначала журнал событий — почему упала; если отключена, верну тип запуска через sc config и запущу; причину — драйвер — передам на вторую линию.',
+      'Причина — DHCP не ответил, адрес был 169.254. Нашёл через ipconfig /all, сделал release и renew, заявитель подтвердил, что сайты открываются.',
+    ]
+    for (const a of answers) await s().answerInterview(a)
+    expect(s().interview!.stage).toBe('questions')
+    await s().askInterviewer('Какой у вас график смен?')
+    expect(s().interview!.transcript.at(-1)!.text)
+      .toBe('Две смены по будням: с восьми до пяти и с одиннадцати до восьми. В выходные — дежурства по графику, раз в месяц.')
+
+    const { result } = s().finishInterview()!
+    expect(result).toMatchObject({ verdict: 'hire', intro: 1, technical: 1, experience: 1, questionsAsked: 1 })
+    expect(result.items.map(i => [i.id, i.answers.length, i.missing])).toEqual([
+      ['intro', 1, []],
+      ['apipa', 2, []],  // первый ответ — только DHCP, прозвучало уточнение
+      ['lockout', 1, []],
+      ['colleague', 1, []],
+      ['share', 1, []],
+      ['service', 1, []],
+      ['exp-apipa', 1, []],
+    ])
+    expect(result.items.at(-1)!.prompt).toBe('Вы закрывали тикет «Не открываются сайты — нет доступа в сеть». '
+      + 'Расскажите: в чём была причина, как вы её нашли и как убедились, что всё работает?')
+  })
+})
