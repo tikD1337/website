@@ -5,6 +5,8 @@ import { rankFor, weekKey } from '../core/progress/points'
 import { verdictSpread, bestByScenario, shiftPoints } from '../core/progress/compare'
 import { VERDICT } from './verdict'
 import { withPlural } from './plural'
+import { courseState } from '../core/learning/state'
+import { formatDateTime } from './dates'
 
 /**
  * Профиль и сравнение с собой.
@@ -55,6 +57,8 @@ export function ProfileView() {
           </p>
         </div>
 
+        <LearningSection />
+
         <div className="section">
           <h2>Пока пусто</h2>
           <p>
@@ -77,6 +81,8 @@ export function ProfileView() {
           {' '}— и что из этого проседает. Это и есть ответ на вопрос, что качать.
         </p>
       </div>
+
+      <LearningSection />
 
       <div className="section">
         <h2>Ранг</h2>
@@ -205,5 +211,43 @@ export function ProfileView() {
         </p>
       </div>
     </>
+  )
+}
+
+/**
+ * Обучение: прогресс по курсам и значки.
+ *
+ * Значок — за пройденный курс и только за него: срез 5 отложил значки
+ * «до курсов», потому что без повода они украшение. Дата — когда сдан
+ * последний квиз курса; всё выводится из прогресса, а не хранится.
+ */
+function LearningSection() {
+  const courses = useGame(s => s.courses)
+  const learning = useGame(s => s.progress.learning)
+  const open = useGame(s => s.openLearn)
+  const states = courses.map(c => ({ course: c, st: courseState(c, learning) }))
+  const badges = states.filter(x => x.st.done)
+
+  return (
+    <div className="section">
+      <h2>Обучение</h2>
+      {states.map(({ course, st }) => (
+        <div className="row-score" key={course.id}>
+          <div>{course.title}</div>
+          <div className={st.done ? 'mark high' : 'mark'}>{st.lessonsDone} / {st.lessonsTotal}</div>
+          <div className="note">
+            Уроков {st.lessonsDone} из {st.lessonsTotal}, квизов {st.quizzesPassed} из {st.quizzesTotal}.
+          </div>
+        </div>
+      ))}
+      <p className="sub">
+        {badges.length === 0
+          ? 'Значков пока нет: значок даётся за пройденный курс.'
+          : <>Значки: {badges.map(({ course, st }) => `«${course.title}» — курс пройден ${formatDateTime(st.doneAt!)}`).join('; ')}.</>}
+      </p>
+      <div className="bar">
+        <button className="act" type="button" onClick={() => open(null)}>К курсам</button>
+      </div>
+    </div>
   )
 }

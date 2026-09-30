@@ -13,6 +13,7 @@ import { SettingsView } from './SettingsView'
 import { ScorecardView } from './ScorecardView'
 import { HistoryView } from './HistoryView'
 import { ProfileView } from './ProfileView'
+import { CoursesView } from './CoursesView'
 import { BRAND } from '../brand'
 
 const TOOLS: Array<{ id: Tool; label: string }> = [
@@ -28,6 +29,7 @@ const TOOLS: Array<{ id: Tool; label: string }> = [
   { id: 'scorecard', label: 'Разбор' },
   { id: 'history', label: 'История' },
   { id: 'profile', label: 'Профиль' },
+  { id: 'courses', label: 'Курсы' },
   { id: 'settings', label: 'Настройки' },
 ]
 
@@ -70,6 +72,7 @@ export function Shell() {
         {tool === 'scorecard' && <ScorecardView />}
         {tool === 'history' && <HistoryView />}
         {tool === 'profile' && <ProfileView />}
+        {tool === 'courses' && <CoursesView />}
         {tool === 'settings' && <SettingsView />}
       </main>
     </div>
