@@ -1,4 +1,5 @@
-import type { Question, Verdict } from './types'
+import { questionById, questionText } from './questions'
+import type { InterviewResult, InterviewRun, InterviewTrack, Question, QuestionResult, Verdict } from './types'
 
 /**
  * Оценка интервью по чек-листу.
@@ -42,4 +43,35 @@ export function verdictFor(technical: number, experience: number, asked: number)
   if (technical >= 0.7 && experience >= 0.5 && asked >= 1) return 'hire'
   if (technical >= 0.45) return 'maybe'
   return 'no'
+}
+
+/**
+ * Итог интервью: доли по этапам, вопросы кандидата, вердикт и разбор
+ * каждого вопроса — что прозвучало, чего не хватило, какого ответа
+ * ждали.
+ */
+export function gradeInterview(t: InterviewTrack, run: InterviewRun): InterviewResult {
+  const items: QuestionResult[] = run.plan.map(id => {
+    const q = questionById(t, id)
+    const answers = run.answers[id] ?? []
+    return {
+      id, stage: q.stage, prompt: questionText(t, run, id), answers,
+      ...coverage(q, answers),
+      expected: q.expected,
+    }
+  })
+  const mean = (stage: QuestionResult['stage']) => {
+    const xs = items.filter(i => i.stage === stage)
+    return xs.length ? xs.reduce((s, i) => s + i.score, 0) / xs.length : 0
+  }
+  const technical = mean('technical')
+  const experience = mean('experience')
+  return {
+    verdict: verdictFor(technical, experience, run.asked.length),
+    intro: mean('intro'),
+    technical,
+    experience,
+    questionsAsked: run.asked.length,
+    items,
+  }
 }
