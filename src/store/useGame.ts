@@ -12,6 +12,13 @@ import { STAGES } from '../core/logistics/types'
 import { draftFrom } from '../core/kb/draft'
 import { editArticle as editKb, setStatus as setKbStatus, type KbResult } from '../core/kb/edit'
 import { mergeKb } from '../core/kb/search'
+import { COURSES } from '../courses'
+import { validateCourses } from '../core/learning/validate'
+import { checkAnswer, gradeQuiz, type QuizGrade } from '../core/learning/answer'
+import {
+  courseState, recordCheck, recordQuiz, mergeLearning, checkPath, quizPath,
+} from '../core/learning/state'
+import type { Answer, Course, Learning } from '../core/learning/types'
 import type { KbArticle, KbStatus, KbType } from '../core/kb/types'
 import {
   createQueueGenerator, fillQueue, SHIFT_WINDOW,
@@ -73,7 +80,23 @@ import {
 
 export type Tool =
   | 'queue' | 'ticket' | 'terminal' | 'directory' | 'serverroom' | 'assets' | 'logistics' | 'kb' | 'comms'
-  | 'settings' | 'scorecard' | 'history' | 'profile'
+  | 'settings' | 'scorecard' | 'history' | 'profile' | 'courses'
+
+/** Где остановился ученик: курс, секция, урок или квиз секции. */
+export interface LearnAt {
+  course: string
+  section?: string
+  lesson?: string
+  quiz?: true
+}
+
+export type AnswerResult = { ok: true; correct: boolean; why: string | null } | { ok: false; error: string }
+export type QuizSubmit = { ok: true; grade: QuizGrade } | { ok: false; error: string }
+export type PracticeResult =
+  | { status: 'opened' }
+  | { status: 'blocked'; error: string }
+  /** тикета в окне нет; новая смена забудет отложенные тикеты `lost` */
+  | { status: 'needs-new-shift'; lost: string[] }
 
 export interface TerminalLine {
   kind: 'prompt' | 'output' | 'notice'
@@ -249,6 +272,20 @@ export interface GameState {
   closeViewing(): void
   /** стереть прогресс: необратимо, живёт в настройках, а не в reset */
   wipeProgress(): void
+
+  /** библиотека курсов — проверена загрузчиком при создании стора */
+  courses: Course[]
+  /** где остановился ученик; переживает смену и переход к тикету */
+  learnAt: LearnAt | null
+  openLearn(at: LearnAt | null): void
+  answerCheck(course: string, section: string, lesson: string, check: string, answer: Answer): AnswerResult
+  submitQuiz(course: string, section: string, answers: Record<string, Answer>): QuizSubmit
+  /**
+   * Урок открывает свой тикет по правилам очереди: свой — открыть,
+   * чужой в работе — отказ, в окне смены — взять, иначе — новая смена,
+   * но только с подтверждением (`newShift`).
+   */
+  practice(scenarioId: string, newShift?: boolean): PracticeResult
 }
 
 /** Вход на коммутатор по SSH — так начинается любой сеанс консоли. */
@@ -273,6 +310,7 @@ export function createGameStore(
   shiftWindow = SHIFT_WINDOW,
   /** библиотека сценариев; подменяется в тестах, которым нужен свой сценарий */
   library: Scenario[] = SCENARIOS,
+  courses: Course[] = COURSES,
 ): UseBoundStore<StoreApi<GameState>> {
   const registry = createRegistry()
   registry.register('ipconfig', ipconfig)
@@ -310,8 +348,15 @@ export function createGameStore(
 
   // Опечатка в сценарии падает при запуске, а не когда до него дойдёт очередь.
   validateScenarios(library)
+  /*
+    Курсы сверяются с каталогом сценариев, а не только с библиотекой
+    стора: тестам со своей библиотекой не нужны сценарии курса, а
+    опечатка в ссылке на практику всё равно падает здесь.
+  */
+  validateCourses(courses, [...new Set([...SCENARIOS, ...library].map(sc => sc.id))])
 
-  const fresh = () => {
+  /** `first` — сценарий, который новая смена ставит первым в пул: так урок открывает свою практику. */
+  const fresh = (first?: string) => {
     /*
       Мир начинается исправным и ломается по мере того, как тикеты
       входят в окно смены, — см. `fillQueue`. Сценарий, ждущий в пуле,
@@ -333,6 +378,7 @@ export function createGameStore(
     const shiftId = `SH-${stamp}-${shiftCounter}`
     generator.tickets = []
     generator.pool = library.map(s => s.id)
+    if (first) generator.pool = [first, ...generator.pool.filter(id => id !== first)]
     generator.exhausted = false
     generator.injected = []
     fillQueue(generator, library, world)
@@ -398,6 +444,8 @@ export function createGameStore(
           records: [...loaded.records, ...inMemory.records],
           // Черновик мог появиться до конца загрузки: слияние не повторит номер.
           kb: mergeKb(loaded.kb, inMemory.kb),
+          // Ответы, данные до конца загрузки, не теряются.
+          learning: mergeLearning(loaded.learning, inMemory.learning),
         },
         progressLoaded: true,
       })
@@ -450,8 +498,21 @@ export function createGameStore(
       })
     }
 
+    /** Обучение правится синхронно, хранилище получает его следом. */
+    const commitLearning = (learning: Learning) => {
+      const progress = { ...get().progress, learning }
+      set({ progress })
+      void saveProgress(progress).catch(() => {
+        // Хранилище недоступно — прогресс обучения живёт в памяти до перезагрузки.
+      })
+    }
+
+    const findCourse = (id: string) => get().courses.find(c => c.id === id)
+
     return {
     ...fresh(),
+    courses,
+    learnAt: null,
 
     /*
       Новая смена по кнопке «Пройти заново». Первую смену собирает
@@ -1360,6 +1421,81 @@ export function createGameStore(
       } catch {
         set({ progress: emptyProgress() })
       }
+    },
+
+    openLearn(at) {
+      set({ learnAt: at, activeTool: 'courses' })
+    },
+
+    answerCheck(courseId, sectionId, lessonId, checkId, answer) {
+      const course = findCourse(courseId)
+      if (!course) return { ok: false, error: 'курс не найден' }
+      const section = course.sections.find(x => x.id === sectionId)
+      const lesson = section?.lessons.find(x => x.id === lessonId)
+      const check = lesson?.checks.find(x => x.id === checkId)
+      if (!section || !lesson || !check) return { ok: false, error: 'урок не найден' }
+
+      // Правило живёт здесь, а не в кнопке: спрятанная кнопка защищает только от мыши.
+      const learning = get().progress.learning
+      const status = courseState(course, learning).sections
+        .find(x => x.id === section.id)!.lessons.find(x => x.id === lesson.id)!.status
+      if (status === 'locked') return { ok: false, error: 'урок закрыт' }
+
+      const verdict = checkAnswer(check, answer)
+      if (verdict.correct) {
+        const next = recordCheck(learning, checkPath(course.id, section.id, lesson.id, check.id))
+        if (next !== learning) commitLearning(next)
+      }
+      return { ok: true, ...verdict }
+    },
+
+    submitQuiz(courseId, sectionId, answers) {
+      const course = findCourse(courseId)
+      if (!course) return { ok: false, error: 'курс не найден' }
+      const section = course.sections.find(x => x.id === sectionId)
+      if (!section) return { ok: false, error: 'квиз не найден' }
+
+      const learning = get().progress.learning
+      const status = courseState(course, learning).sections.find(x => x.id === section.id)!.quiz
+      if (status === 'locked') return { ok: false, error: 'квиз закрыт' }
+
+      const grade = gradeQuiz(section.quiz, answers)
+      commitLearning(recordQuiz(learning, quizPath(course.id, section.id), grade, clock.now().toISOString()))
+      return { ok: true, grade }
+    },
+
+    practice(scenarioId, newShift = false) {
+      const st = get()
+      if (!library.some(sc => sc.id === scenarioId)) return { status: 'blocked', error: 'сценарий не найден' }
+
+      const inWindow = st.queue.tickets.find(t => t.scenarioId === scenarioId && t.status !== 'completed')
+      if (inWindow && st.queue.assigned === inWindow.number) {
+        st.claimTicket(inWindow.number)
+        return { status: 'opened' }
+      }
+      // Урок — не чёрный ход мимо правила «один в работе».
+      if (st.queue.assigned) return { status: 'blocked', error: 'сначала завершите текущий тикет' }
+      if (inWindow) {
+        st.claimTicket(inWindow.number)
+        return { status: 'opened' }
+      }
+
+      /*
+        Тикета этого сценария в окне нет. Вставить его сверх окна значило
+        бы нарушить окно смены; честный путь — новая смена с ним первым.
+        Она необратима: отложенные тикеты («Ждём поставку») забудутся, и
+        об этом говорится до подтверждения, а не после.
+      */
+      if (!newShift) {
+        const lost = st.queue.tickets.filter(t => t.status === 'pending-shipment').map(t => t.number)
+        return { status: 'needs-new-shift', lost }
+      }
+      const { progress, progressLoaded } = st
+      set({ ...fresh(scenarioId), progress, progressLoaded })
+      const ticket = get().queue.tickets.find(t => t.scenarioId === scenarioId)
+      if (!ticket) return { status: 'blocked', error: 'тикет не вошёл в новую смену' }
+      get().claimTicket(ticket.number)
+      return { status: 'opened' }
     },
     }
   })

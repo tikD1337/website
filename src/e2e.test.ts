@@ -4,6 +4,9 @@ import { hasShareAccess } from './core/directory/accounts'
 import { defaultConfig } from './core/dialogue/types'
 import { SCENARIOS } from './scenarios'
 import { relatedTo } from './core/kb/search'
+import { courseState } from './core/learning/state'
+import { firstLine } from './courses/first-line'
+import type { Answer, Check } from './core/learning/types'
 import type { FetchLike } from './core/dialogue/openai'
 
 /**
@@ -667,5 +670,32 @@ describe('база знаний', () => {
     expect(s().progress.kb).toHaveLength(1)
     expect(s().progress.kb[0]).toMatchObject({ version: 1 })
     expect(s().progress.kb[0]!.sources).toHaveLength(2)
+  })
+})
+
+describe('курсы', () => {
+  it('секция проходится целиком и открывает следующую; урок ведёт на свой тикет', () => {
+    const g = createGameStore({ now: () => new Date('2026-09-30T10:00:00.000Z') })
+    const s = () => g.getState()
+    const right = (c: Check): Answer => (c.kind === 'choice' ? c.options.findIndex(o => o.correct) : c.accept[0]!)
+    const process = firstLine.sections[0]!
+
+    for (const l of process.lessons) {
+      for (const c of l.checks) expect(s().answerCheck('first-line', 'process', l.id, c.id, right(c))).toMatchObject({ correct: true })
+    }
+    const answers = Object.fromEntries(process.quiz.map(q => [q.id, right(q)]))
+    expect(s().submitQuiz('first-line', 'process', answers)).toMatchObject({ ok: true, grade: { score: 5, passed: true } })
+    expect(courseState(firstLine, s().progress.learning).sections.map(x => x.status))
+      .toEqual(['open', 'open', 'locked', 'locked'])
+
+    // Урок «DHCP и самоназначенный адрес» ведёт на тикет APIPA.
+    expect(s().practice(firstLine.sections[1]!.lessons[1]!.practice!)).toEqual({ status: 'opened' })
+    s().runCommand('ipconfig /release')
+    s().runCommand('ipconfig /renew')
+    s().confirmWithUser()
+    s().saveResolutionNotes('ipconfig /release и ipconfig /renew выдали адрес, заявитель подтвердил.')
+    s().setResolutionCode('solved')
+    s().resolveTicket()
+    expect(s().progress.records.map(r => r.scenarioId)).toEqual(['net-apipa-no-lease'])
   })
 })

@@ -12,6 +12,8 @@ import { apipaNoLease } from '../scenarios/net-apipa-no-lease'
 import { SCENARIOS } from '../scenarios'
 import { HANDOFF_REPLY } from '../core/dialogue/scripted'
 import type { Scenario } from '../core/scenario/types'
+import type { Answer, Check, Lesson, Section } from '../core/learning/types'
+import { firstLine } from '../courses/first-line'
 
 let g: ReturnType<typeof createGameStore>
 const s = () => g.getState()
@@ -549,5 +551,82 @@ describe('база знаний', () => {
     s().claimTicket(nextOpen().number)
     s().openArticle('KB-0001')
     expect(s().session.inspected).toContain('kb:kb-0001')
+  })
+})
+
+describe('курсы', () => {
+  const course = firstLine
+  const process = course.sections[0]!
+  /** Верный ответ проверки — выводится из контента, а не подбирается. */
+  const right = (c: Check): Answer => (c.kind === 'choice' ? c.options.findIndex(o => o.correct) : c.accept[0]!)
+  const wrong = (c: Check): Answer => (c.kind === 'choice' ? c.options.findIndex(o => !o.correct) : 'не то')
+  const passLessons = (sec: Section) => {
+    for (const l of sec.lessons) for (const c of l.checks) s().answerCheck(course.id, sec.id, l.id, c.id, right(c))
+  }
+
+  it('ответ пишется только в открытом уроке; квиз — в хранилище', () => {
+    const [l1, l2] = process.lessons as [Lesson, Lesson]
+    const k = l1.checks[0]!
+
+    expect(s().answerCheck(course.id, process.id, l1.id, k.id, wrong(k))).toMatchObject({ ok: true, correct: false })
+    expect(s().progress.learning.checks, 'неверный ответ не пишется').toEqual([])
+    expect(s().answerCheck(course.id, process.id, l1.id, k.id, right(k))).toMatchObject({ ok: true, correct: true })
+    expect(s().progress.learning.checks).toEqual(['first-line/process/ownership/first-step'])
+
+    // Правило живёт в сторе: спрятанная кнопка защищает только от мыши.
+    expect(s().answerCheck(course.id, process.id, l2.id, l2.checks[0]!.id, right(l2.checks[0]!)))
+      .toEqual({ ok: false, error: 'урок закрыт' })
+    expect(s().submitQuiz(course.id, process.id, {})).toEqual({ ok: false, error: 'квиз закрыт' })
+    expect(s().answerCheck('nope', process.id, l1.id, k.id, 0)).toEqual({ ok: false, error: 'курс не найден' })
+    expect(s().answerCheck(course.id, process.id, 'nope', k.id, 0)).toEqual({ ok: false, error: 'урок не найден' })
+    expect(s().progress.learning.checks).toHaveLength(1)
+
+    passLessons(process)
+    const answers = Object.fromEntries(process.quiz.map((q, i) => [q.id, i < 3 ? right(q) : wrong(q)]))
+    expect(s().submitQuiz(course.id, process.id, answers)).toMatchObject({ ok: true, grade: { score: 3, total: 5, passed: false } })
+    const saved = vi.mocked(saveProgress).mock.calls.at(-1)![0]
+    expect(saved.learning.quizzes).toEqual([{ id: 'first-line/process', attempts: 1, best: 3, total: 5, passedAt: null }])
+    expect(saved.learning.checks).toHaveLength(process.lessons.flatMap(l => l.checks).length)
+    // Запись проверяется перед сохранением и молча не пишется, если проверка не прошла.
+    expect(validateProgress(saved)).toEqual([])
+  })
+
+  it('практика открывает тикет по правилам очереди', () => {
+    // Блокировка в окне смены, ничего не взято — тикет берётся.
+    expect(s().practice('identity-account-lockout')).toEqual({ status: 'opened' })
+    const taken = s().queue.assigned!
+    expect(s().queue.tickets.find(t => t.number === taken)!.scenarioId).toBe('identity-account-lockout')
+    expect(s().activeTool).toBe('ticket')
+
+    // Тот же снова — тот же инцидент, журнал не сброшен.
+    s().runCommand('whoami')
+    s().setTool('courses')
+    expect(s().practice('identity-account-lockout')).toEqual({ status: 'opened' })
+    expect(s().session.commands.map(c => c.cmdline)).toEqual(['whoami'])
+
+    // В работе чужой — отказ словами очереди, мир и журнал не тронуты.
+    expect(s().practice('net-apipa-no-lease')).toEqual({ status: 'blocked', error: 'сначала завершите текущий тикет' })
+    expect(s().queue.assigned).toBe(taken)
+    expect(s().practice('no-such-scenario')).toEqual({ status: 'blocked', error: 'сценарий не найден' })
+  })
+
+  it('сценария нет в окне: новая смена только с подтверждением, отложенный тикет назван', () => {
+    const dock = SCENARIOS.find(x => x.id === 'hw-dock-failed')!
+    g = createGameStore(clockAt('2026-09-28T09:00:00.000Z'), undefined, 1, [dock, apipaNoLease])
+    const dockNumber = firstNumber()
+    s().claimTicket(dockNumber)
+    s().createShipment({ type: 'dock-monitor-swap', assetTag: 'AL-P2040' })
+    expect(s().waitForShipment()).toEqual({ ok: true })
+    s().openLearn({ course: course.id, section: 'network', lesson: 'dhcp-apipa' })
+    const world = s().world
+
+    expect(s().practice('net-apipa-no-lease')).toEqual({ status: 'needs-new-shift', lost: [dockNumber] })
+    expect(s().world, 'без подтверждения смена не меняется').toBe(world)
+
+    expect(s().practice('net-apipa-no-lease', true)).toEqual({ status: 'opened' })
+    expect(s().world).not.toBe(world)
+    expect(s().queue.tickets.find(t => t.number === s().queue.assigned)!.scenarioId).toBe('net-apipa-no-lease')
+    expect(s().parked).toEqual({})
+    expect(s().learnAt).toEqual({ course: course.id, section: 'network', lesson: 'dhcp-apipa' })
   })
 })
