@@ -1,0 +1,199 @@
+# Срез 7А — курсы: план реализации
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** курсы как в оригинале: уроки с проверками, секции по квизам, урок открывает свой тренировочный тикет; первый курс «Первая линия» — 4 секции × 4 урока.
+
+**Architecture:** чистое ядро `core/learning/` (типы, разбор ответа, квиз, статусы, загрузчик-сторож); курс — модуль TypeScript в `src/courses/`, как сценарии; прогресс обучения — поле `Progress.learning` рядом с историей и базой знаний. Стор проверяет, открыт ли урок, и открывает практику по правилам очереди.
+
+**Tech Stack:** TypeScript, React 18, zustand, vitest. Без новых зависимостей.
+
+**Spec:** `docs/superpowers/specs/2026-09-30-slice-7a-courses-design.md`
+
+## Global Constraints
+
+- Ядро (`src/core/**`) — без React, `window` и `Date.now()`; время — аргументом.
+- Интерфейс и тексты — по-русски. Цвет — только суждение (верно/неверно, пройден/сдан); закрытое — словом и приглушённым текстом.
+- Контент свой; бренды — только из `src/brand.ts`, `FORBIDDEN_TRADEMARKS` не встречаются.
+- Прочитанное из хранилища — `unknown`, пока не проверено; проверка не бросает.
+- Порог квиза — `score * 5 >= total * 4` (4 из 5).
+- Тесты — по разделу CLAUDE.md «Какие тесты писать».
+- Не использовать `git add -A`. Коммит после каждой задачи, `npm run typecheck` и `npm test` зелёные.
+
+## Review Focus
+
+1. **Прогресс от прошлой редакции курса** — в `learning.checks` адреса проверок, которых больше нет, а у урока появилась новая проверка: статусы считаются по текущему курсу, лишнее молча игнорируется, урок снова «открыт». Тест — задача 2.
+2. **Квиз с неотвеченным вопросом** — считается неверным, `why: null`, ничего не падает. Тест — задача 1.
+3. **Повторный верный ответ** — адрес в `checks` не дублируется. Тест — задача 2.
+4. **Новая смена при отложенном тикете** — «Ждём поставку» названа в `lost` до подтверждения. Тест — задача 7.
+5. **Урок с блоком кода на 900 px** — код прокручивается внутри блока, страница не уезжает вбок. Проверка — задача 8 (визуальная).
+
+---
+
+## Раскладка файлов
+
+| Файл | Ответственность |
+|---|---|
+| `src/core/learning/types.ts` | `Block`, `Option`, `Check`, `Lesson`, `Section`, `Course`, `Learning`, `QuizResult` |
+| `src/core/learning/answer.ts` | разбор ответа, оценка квиза |
+| `src/core/learning/state.ts` | статусы курса, запись ответа и квиза, слияние при гидратации |
+| `src/core/learning/validate.ts` | загрузчик-сторож контента |
+| `src/core/progress/types.ts`, `validate.ts` | `Progress.learning`, проверка, прошлый формат |
+| `src/courses/first-line.ts`, `src/courses/index.ts` | курс «Первая линия», `COURSES` |
+| `src/store/useGame.ts` | `learnAt`, ответы, квиз, практика |
+| `src/ui/CoursesView.tsx`, `src/ui/learn/LessonView.tsx`, `src/ui/learn/QuizView.tsx` | инструмент «Курсы» |
+
+---
+
+### Task 1: Разбор ответа и квиз
+
+**Files:**
+- Create: `src/core/learning/types.ts`, `src/core/learning/answer.ts`
+- Test: `src/core/learning/answer.test.ts`
+
+**Interfaces:**
+- Produces: типы из спеки (`Block`, `Option`, `Check`, `Lesson`, `Section`, `Course`, `QuizResult`, `Learning`); `type Answer = number | string`; `checkAnswer(check: Check, answer: Answer | undefined): { correct: boolean; why: string | null }`; `interface QuizGrade { score: number; total: number; passed: boolean; items: Array<{ id: string; correct: boolean; why: string | null }> }`; `gradeQuiz(quiz: Check[], answers: Record<string, Answer>): QuizGrade`; `normalizeText(s: string): string` (обрезка, нижний регистр, схлопнутые пробелы).
+
+- [ ] **Step 1: Тесты**
+  - `it('ответ разбирается: выбор, текст с нормализацией, известный промах')`: таблица `[подпись, проверка, ответ, { correct, why }]` — верный вариант → `why` верного; неверный → `why` этого варианта; текст `'  IPCONFIG   /release '` при `accept: ['ipconfig /release']` → верно, `why` проверки; `'ipconfig /renew'` из `misses` → неверно, `why` промаха; незнакомый текст → `{ correct: false, why: null }`; `undefined` → `{ correct: false, why: null }`; индекс вне вариантов → неверно, `why: null`.
+  - `it('квиз: порог 4 из 5, у несданного разобраны только неверные')`: 5 вопросов, 4 верных → `passed: true`, у всех пяти `why` не `null`; 3 верных и один вопрос без ответа → `{ score: 3, total: 5, passed: false }`, у верных `why: null`, у неверного выбранного — его `why`, у неотвеченного `null`.
+- [ ] **Step 2–4:** падают → реализация → зелёный.
+- [ ] **Step 5:** коммит «Курсы: разбор ответа и квиз».
+
+### Task 2: Статусы курса и запись прогресса
+
+**Files:**
+- Create: `src/core/learning/state.ts`
+- Test: `src/core/learning/state.test.ts`
+
+**Interfaces:**
+- Consumes: задача 1.
+- Produces: `emptyLearning(): Learning`; `checkPath(course, section, lesson, check): string` → `'c/s/l/k'`; `quizPath(course, section): string` → `'c/s'`; `interface CourseState { done: boolean; doneAt: string | null; lessonsDone: number; lessonsTotal: number; quizzesPassed: number; quizzesTotal: number; sections: Array<{ id: string; status: 'open' | 'locked'; quiz: 'passed' | 'open' | 'locked'; lessons: Array<{ id: string; status: 'done' | 'open' | 'locked' }> }> }`; `courseState(course: Course, l: Learning): CourseState`; `recordCheck(l: Learning, path: string): Learning`; `recordQuiz(l: Learning, path: string, g: QuizGrade, at: string): Learning`; `mergeLearning(loaded: Learning, inMemory: Learning): Learning`. Все — без мутации входа.
+
+Открытие: первая секция открыта; секция k+1 открыта, если квиз секции k сдан. В открытой секции урок 1 открыт, урок j+1 — если урок j пройден; урок пройден, если все его проверки в `checks`. Квиз открыт, когда пройдены все уроки секции. Курс пройден, когда сданы все квизы; `doneAt` — самый поздний `passedAt`.
+
+- [ ] **Step 1: Тесты** (курс-литерал: 2 секции × 2 урока × 1–2 проверки)
+  - `it('открытие идёт цепочкой: урок за уроком, квиз после уроков, секция после квиза')`: пустой прогресс → `[open,locked] / quiz locked / секция 2 locked`; по одному шагу `recordCheck`/`recordQuiz` — статусы литералами после каждого; сданный квиз второй секции → `done: true`, `doneAt` — дата последней сдачи.
+  - `it('несданная попытка пишется, секцию не открывает')`: `recordQuiz` с `passed: false` → `{ attempts: 1, best: 3, passedAt: null }`, секция 2 закрыта; затем сдача → `attempts: 2, best: 5, passedAt: <дата>`; повторная сдача позже — `passedAt` прежний.
+  - `it('прогресс прошлой редакции курса: лишнее игнорируется, новая проверка переоткрывает урок')` (Review Focus 1): в `checks` адрес несуществующей проверки и все прежние проверки урока, у урока добавлена ещё одна → урок `open`, `lessonsDone` без лишнего адреса.
+  - `it('повторный верный ответ не дублируется; слияние — объединение и лучшее из попыток')` (Review Focus 3): `recordCheck` дважды → адрес один раз; `mergeLearning` — `checks` объединены без дублей, квиз одного адреса: попытки сложены, `best` — максимум, `passedAt` — более ранний не-`null`; вход не изменён.
+- [ ] **Step 2–5:** падают → реализация → зелёный → коммит «Курсы: статусы и запись прогресса».
+
+### Task 3: Загрузчик-сторож контента
+
+**Files:**
+- Create: `src/core/learning/validate.ts`
+- Test: `src/core/learning/validate.test.ts`
+
+**Interfaces:**
+- Consumes: задача 1.
+- Produces: `validateCourses(courses: Course[], scenarioIds: string[]): void` — бросает `Error` с адресом и причиной, например `курс first-line/network/dhcp: у проверки k2 нет верного варианта`.
+
+Правила — спека, раздел «Загрузчик». Текст ошибки начинается с `курс ` и адреса; причины: `повторяется id`, `нет верного варианта`, `верных вариантов больше одного`, `меньше двух вариантов`, `у варианта нет разбора`, `нет допустимых ответов`, `у урока нет проверок`, `у секции нет уроков`, `у квиза нет вопросов`, `практика ссылается на неизвестный сценарий`.
+
+- [ ] **Step 1: Тесты**
+  - `it('исправный курс проходит')`.
+  - `it('испорченный курс падает с адресом и причиной')`: таблица `[подпись, правка курса-литерала, ожидаемая подстрока ошибки]` — по строке на каждую причину выше; `expect(() => validateCourses(...), подпись).toThrow(подстрока)`.
+- [ ] **Step 2–5:** падают → реализация → зелёный → коммит «Курсы: загрузчик проверяет контент».
+
+### Task 4: Обучение в прогрессе
+
+**Files:**
+- Modify: `src/core/progress/types.ts`, `src/core/progress/validate.ts`
+- Test: `src/core/progress/validate.test.ts`, `src/core/progress/db.test.ts`
+
+**Interfaces:**
+- Consumes: `Learning`, `emptyLearning` (задачи 1–2).
+- Produces: `Progress.learning: Learning`; `emptyProgress().learning` пуст; `validateProgress` принимает прогресс без `learning`, отвергает битое (код `bad_learning`: не объект, `checks` не массив строк, квиз без строкового `id`, `attempts`/`best`/`total` не числа, `passedAt` не строка и не `null`); `normalizeProgress` достраивает `learning`.
+
+- [ ] **Step 1: Тесты**
+  - `validate.test.ts` → `it('обучение: прошлый формат читается, битое — ошибка')`: `{ version: 1, records: [], kb: [] }` → ошибок нет, `normalizeProgress` даёт `learning: { checks: [], quizzes: [] }`; таблица битого → `['bad_learning']`.
+  - `db.test.ts`: существующий тест прошлого формата ожидает и `learning` пустым.
+- [ ] **Step 2–5:** падают → реализация → зелёный → коммит «Обучение хранится в прогрессе».
+
+### Task 5: Курс «Первая линия», секции 1–2
+
+**Files:**
+- Create: `src/courses/first-line.ts`, `src/courses/index.ts`
+- Modify: `src/brand.test.ts` (курсы в источниках)
+- Test: `src/courses/courses.test.ts`
+
+**Interfaces:**
+- Consumes: типы и `validateCourses` (задачи 1, 3).
+- Produces: `firstLine: Course` (`id: 'first-line'`, `title: 'Первая линия'`), `COURSES: Course[]`.
+
+Секции и уроки (id, заголовок, практика, что донести). В каждом уроке 2–4 блока текста и **не меньше трёх** проверок, хотя бы одна — текстовая, если у темы есть команда; квиз секции — 5 вопросов, новых, а не повтор проверок уроков.
+
+`process` «Тикет и процесс»:
+- `ownership` «Владение тикетом» (`net-apipa-no-lease`) — взять тикет до работы; один в работе; рабочий статус не закрывает, нужен код; «Ждём пользователя» — статус, а не закрытие.
+- `identity` «Сверка личности» (`identity-account-lockout`) — до изменения учётки; контрольный вопрос из каталога, а не «я Иван из бухгалтерии»; сверка относится к одной учётке; сброс без сверки — ошибка суждения.
+- `notes` «Заметка о решении» (`net-apipa-no-lease`) — пять частей: симптом словами заявителя, проверки и что исключили, одно изменение с конкретным значением, чем подтверждено, что знать следующему.
+- `confirm-escalate` «Подтверждение и эскалация» (`net-dhcp-relay-missing`) — подтверждает заявитель, а не техник; заявитель не оракул; вне полномочий — передать с доказательствами и предупредить заявителя; «отказано» и «помечено» — разные границы.
+
+`network` «Сеть»:
+- `ipconfig` «Читаем ipconfig /all» (`net-apipa-no-lease`) — адрес, маска, шлюз, DNS, DHCP-сервер, аренда; `ping` адреса против имени — проверка одной вещи за раз; `nslookup`.
+- `dhcp-apipa` «DHCP и самоназначенный адрес» (`net-apipa-no-lease`) — 169.254.x.x значит «DHCP не ответил»; `ipconfig /release`, затем `/renew`; `renew` в одиночку падает; ошибка DNS в браузере — следствие.
+- `vlan-port` «VLAN и порт коммутатора» (`net-wrong-vlan-port`) — розетка ведёт в порт, порт в VLAN; порт находится по MAC: `show mac address-table address`; `switchport access vlan`; без `write memory` правка не переживёт перезагрузку; менять только порт своей машины.
+- `relay` «Ретрансляция DHCP» (`net-dhcp-relay-missing`) — DHCP-сервер в другой сети, ядро пересылает запросы (`ip helper-address` на интерфейсе VLAN); у многих сразу — общая причина; масштаб выясняют у коллег; ядро — не первая линия.
+
+- [ ] **Step 1: Тесты** — `courses.test.ts` → `it('курсы проходят загрузчик и ссылаются на библиотеку')`: `validateCourses(COURSES, SCENARIOS.map(s => s.id))` не бросает; в `firstLine` секции `['process','network']` (после задачи 6 — все четыре), в каждой 4 урока, квиз из 5. `brand.test.ts`: `courses: COURSES` в `sources`.
+- [ ] **Step 2–5:** падают → текст → зелёный → коммит «Курс „Первая линия“: процесс и сеть».
+
+### Task 6: Курс «Первая линия», секции 3–4
+
+**Files:**
+- Modify: `src/courses/first-line.ts`, `src/courses/courses.test.ts`
+
+Правила текста — задача 5.
+
+`accounts` «Учётные записи»:
+- `lockout-reset` «Блокировка и сброс пароля» (`identity-account-lockout`) — заблокирована ≠ забыт пароль; `net user <имя> /domain`, поле «Учётная запись активна» и блокировка; разблокировать, а не сбрасывать, если пароль человек помнит.
+- `lockout-source` «Источник блокировки» (`identity-account-lockout`) — блокировку делает устройство со старым паролем; журнал: 4771 (неудачная предварительная проверка), 4740 (учётка заблокирована) и имя источника; телефон с почтой; без устранения источника блокировка вернётся.
+- `groups` «Доступ через группы» (`identity-share-access`) — право даётся группе, человек входит в группу; личная выдача мимо группы — ошибка суждения; привилегированные группы — отказ, в обе стороны.
+- `logon-token` «Билет входа» (`identity-share-access`) — группы попадают в билет при входе; `net user` видит новую группу сразу, `whoami /groups` — после повторного входа; расхождение — способ диагностики.
+
+`workplace` «Рабочее место и оборудование»:
+- `services` «Службы и журнал событий» (`print-spooler-stopped`) — `sc query <служба>`, состояние и тип запуска; остановленная служба и причина в журнале; запустить и убедиться, что осталась запущенной.
+- `device-manager` «Диспетчер устройств» (`hw-dock-failed`) — жёлтый знак и код ошибки (Code 43: устройство сообщило о сбое); переподключение — первая проверка; исправный вид ≠ исправное устройство.
+- `warranty` «Гарантия, RMA и утилизация» (`hw-headset-worn`) — карточка актива: владелец, учёт, гарантия до; на гарантии — вендору (RMA), без гарантии — утилизация; утилизировать гарантийное — ошибка суждения, RMA без гарантии вендор отклонит.
+- `waiting` «Ожидание поставки» (`hw-dock-failed`) — замена со склада на стол заявителя; «Ждём поставку» отпускает слот; рабочие заметки о доставке; после доставки — подтверждение у заявителя и закрытие.
+
+- [ ] **Step 1:** тест задачи 5 — все четыре секции `['process','network','accounts','workplace']`, 16 уроков, 4 квиза.
+- [ ] **Step 2–5:** падает → текст → зелёный → коммит «Курс „Первая линия“: учётные записи и оборудование».
+
+### Task 7: Стор и сквозной проход
+
+**Files:**
+- Modify: `src/store/useGame.ts`, `src/store/useGame.test.ts`, `src/e2e.test.ts`
+
+**Interfaces:**
+- Consumes: задачи 1–6.
+- Produces: `Tool` += `'courses'`; `courses: Course[]` в состоянии (из опций стора, по умолчанию `COURSES`; загрузчик — при создании стора); `learnAt: { course: string; lesson?: string; quiz?: string } | null` — вне `fresh()`, переживает смену; `openLearn(at): void` → `learnAt`, `activeTool: 'courses'`; `answerCheck(course, lesson, check, answer): { ok: true; correct: boolean; why: string | null } | { ok: false; error: string }`; `submitQuiz(course, section, answers: Record<string, Answer>): { ok: true; grade: QuizGrade } | { ok: false; error: string }`; `type PracticeResult = { status: 'opened' } | { status: 'blocked'; error: string } | { status: 'needs-new-shift'; lost: string[] }`; `practice(scenarioId: string, newShift?: boolean): PracticeResult`; `fresh(first?: string)` ставит сценарий первым в пул. Ошибки: `курс не найден`, `урок не найден`, `урок закрыт`, `квиз закрыт`. Запись — синхронно в `progress.learning`, `saveProgress` следом; гидратация — `mergeLearning`.
+
+- [ ] **Step 1: Тесты**
+  - стор → `it('ответ пишется только в открытом уроке; квиз — в хранилище')`: верный ответ на проверку первого урока → в `progress.learning.checks`; ответ во втором (закрытом) → `{ ok: false, error: 'урок закрыт' }`, прогресс не изменён; квиз закрытой секции → `'квиз закрыт'`; после всех уроков секции — `submitQuiz` пишет попытку, `saveProgress` вызван с ней.
+  - стор → `it('практика открывает тикет по правилам очереди')` (Review Focus 4): таблица — сценарий в окне, ничего не взято → `opened`, тикет взят; он же снова → `opened`, журнал не сброшен; в работе чужой → `blocked`, `'сначала завершите текущий тикет'`; сценария нет в окне, есть тикет «Ждём поставку» → `needs-new-shift` с его номером, мир не тронут; с `newShift` → новая смена, взят тикет сценария, `learnAt` прежний.
+  - `e2e` → `describe('курсы')`, `it('секция проходится целиком и открывает следующую; урок ведёт на свой тикет')`: верные ответы на все проверки секции `process` и квиз → `courseState` секции `network` — `open`; `practice('net-apipa-no-lease')` → тикет APIPA взят; образцовое решение → в истории запись этого сценария.
+- [ ] **Step 2–5:** падают → реализация → зелёный → коммит «Стор: курсы, квизы, практика».
+
+### Task 8: «Курсы» в интерфейсе
+
+**Files:**
+- Create: `src/ui/CoursesView.tsx`, `src/ui/learn/LessonView.tsx`, `src/ui/learn/QuizView.tsx`
+- Modify: `src/ui/Shell.tsx` («Курсы» после «Профиля»), `src/ui/ProfileView.tsx` (раздел «Обучение»), `src/styles.css`
+
+Скилл `frontend-design` — в пределах правил интерфейса. Список курсов → курс (секции, уроки, квиз со статусами словом) → урок (блоки; `код` в обратных кавычках — `<code>`; проверки: варианты радиокнопками или поле ввода, «Проверить», вердикт и разбор; пройденная проверка показывает верный ответ; блок «Практика»: сводка тикета, «Взять тикет», последний вердикт по сценарию из истории; подтверждение новой смены на месте кнопки, «Отмена» первой) → квиз (все вопросы, «Сдать», итог «4 из 5 — сдан», разбор, «Пересдать»). Навигация: «К курсу», «Следующий урок». Профиль: «Обучение» — прогресс курсов и значок «Курс пройден» с датой.
+
+- [ ] **Step 1: Визуальная проверка Playwright** — пройти урок (неверный ответ → разбор, верный → «верно»), «Взять тикет» → тикет взят; вернуться в «Курсы» — тот же урок; пройти секцию и квиз (сначала 3 из 5 — разбор без верных ответов, затем сдать) → открыта следующая; перезагрузка — прогресс цел; практика при чужом тикете в работе — отказ словами; новая смена — подтверждение. Снимки 1400×860 и 900×700 (урок с блоком кода — Review Focus 5), ничего за краем, ошибок консоли нет.
+- [ ] **Step 2: Коммит** «Курсы в интерфейсе».
+
+### Task 9: Документы
+
+- [ ] CLAUDE.md: статус (7А сделан, дальше 7Б), модуль `learning/` и `src/courses/`, правила «урок без проверки не пропускается», «секции по квизам, уроки по порядку», «несданный квиз не выдаёт ответов», «практика — по правилам очереди»; «Что нашлось по ходу» и «Решения исполнителя» в этом плане.
+- [ ] Коммит и `git push -u origin claude/gallant-lovelace-29kgtq`.
+
+---
+
+## Что нашлось по ходу
+
+(заполняется при исполнении)
