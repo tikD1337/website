@@ -17,7 +17,7 @@ function rec(over: Partial<TicketRecord> = {}): TicketRecord {
 }
 
 function progress(records: TicketRecord[]): Progress {
-  return { version: 1, records, kb: [] }
+  return { version: 1, records, kb: [], learning: { checks: [], quizzes: [] } }
 }
 
 const codes = (raw: unknown) => validateProgress(raw as never).map(e => e.code)
@@ -66,7 +66,7 @@ describe('разбор прочитанного из хранилища', () => 
   it('прогресс прошлого формата без статей читается; битая статья — ошибка', () => {
     const old = { version: 1, records: [rec()] }
     expect(validateProgress(old)).toEqual([])
-    expect(normalizeProgress(old as Progress)).toEqual({ ...old, kb: [] })
+    expect(normalizeProgress(old as Progress)).toEqual({ ...old, kb: [], learning: { checks: [], quizzes: [] } })
 
     const article = {
       id: 'KB-0001', scenarioId: 's', title: 'Нет сети', type: 'network', body: 'текст',
@@ -99,6 +99,31 @@ describe('разбор прочитанного из хранилища', () => 
     ]
     for (const [name, patch] of broken) {
       expect(codes({ ...old, kb: [{ ...article, ...patch }] }), name).toEqual(['bad_article'])
+    }
+  })
+
+  it('обучение: прошлый формат читается, битое — ошибка', () => {
+    const old = { version: 1, records: [], kb: [] }
+    expect(validateProgress(old)).toEqual([])
+    expect(normalizeProgress(old as unknown as Progress).learning).toEqual({ checks: [], quizzes: [] })
+
+    const quiz = { id: 'first-line/network', attempts: 1, best: 5, total: 5, passedAt: '2026-09-30T10:00:00.000Z' }
+    expect(codes({ ...old, learning: { checks: ['c/s/l/k'], quizzes: [quiz, { ...quiz, passedAt: null }] } }), 'целое').toEqual([])
+
+    const broken: Array<[string, unknown]> = [
+      ['не объект', 'x'],
+      ['проверки не массив', { checks: 'c/s/l/k', quizzes: [] }],
+      ['проверка не строка', { checks: [1], quizzes: [] }],
+      ['квизы не массив', { checks: [], quizzes: {} }],
+      ['квиз без id', { checks: [], quizzes: [{ ...quiz, id: 7 }] }],
+      ['попытки не число', { checks: [], quizzes: [{ ...quiz, attempts: '1' }] }],
+      ['лучший не число', { checks: [], quizzes: [{ ...quiz, best: null }] }],
+      ['всего не число', { checks: [], quizzes: [{ ...quiz, total: undefined }] }],
+      ['дата сдачи не строка', { checks: [], quizzes: [{ ...quiz, passedAt: 5 }] }],
+      ['квиз null', { checks: [], quizzes: [null] }],
+    ]
+    for (const [name, learning] of broken) {
+      expect(codes({ ...old, learning }), name).toEqual(['bad_learning'])
     }
   })
 })

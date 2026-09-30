@@ -63,7 +63,7 @@ describe('чтение испорченного хранилища', () => {
     ]
     for (const stored of cases) {
       ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = fakeIDB(stored)
-      await expect(settles(), JSON.stringify(stored)).resolves.toEqual({ version: 1, records: [], kb: [] })
+      await expect(settles(), JSON.stringify(stored)).resolves.toEqual({ version: 1, records: [], kb: [], learning: { checks: [], quizzes: [] } })
     }
   })
 
@@ -79,7 +79,7 @@ describe('чтение испорченного хранилища', () => {
       enumerable: true,
     })
     ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = fakeIDB(bomb)
-    await expect(settles()).resolves.toEqual({ version: 1, records: [], kb: [] })
+    await expect(settles()).resolves.toEqual({ version: 1, records: [], kb: [], learning: { checks: [], quizzes: [] } })
   })
 
   /*
@@ -90,6 +90,6 @@ describe('чтение испорченного хранилища', () => {
   it('прогресс прошлого формата без статей читается с историей', async () => {
     const old = { version: 1, records: [] as unknown[] }
     ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = fakeIDB(old)
-    await expect(settles()).resolves.toEqual({ version: 1, records: [], kb: [] })
+    await expect(settles()).resolves.toEqual({ version: 1, records: [], kb: [], learning: { checks: [], quizzes: [] } })
   })
 })

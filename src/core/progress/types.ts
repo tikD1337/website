@@ -1,5 +1,6 @@
 import type { Scorecard } from '../grading/grade'
 import type { KbArticle } from '../kb/types'
+import type { Learning } from '../learning/types'
 import type { ResolutionCode } from '../tickets/types'
 
 /**
@@ -60,8 +61,14 @@ export interface Progress {
    * прогресс прошлого формата без него читается как «статей нет».
    */
   kb: KbArticle[]
+  /**
+   * Обучение (срез 7А): верные ответы на проверки уроков и попытки
+   * квизов. Поле добавочное, как `kb`: прогресс без него читается как
+   * «ничего не пройдено».
+   */
+  learning: Learning
 }
 
 export function emptyProgress(): Progress {
-  return { version: 1, records: [], kb: [] }
+  return { version: 1, records: [], kb: [], learning: { checks: [], quizzes: [] } }
 }
