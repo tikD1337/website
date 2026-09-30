@@ -675,6 +675,34 @@ describe('интервью', () => {
     await pending
     expect(s().interview, 'новое интервью не тронуто').toBe(fresh)
     expect(s().interview!.transcript.map(l => l.text)).not.toContain('Старая реакция')
+    expect(s().interviewBusy, 'флаг «думает» сброшен новым началом, а не залип').toBe(false)
+  })
+
+  /*
+    Обзор среза 7Б предлагал сбрасывать «думает» и при отброшенном
+    ответе. Это открыло бы ввод посреди чужого запроса: вы начали
+    заново и ответили, модель думает над новым ответом — и старый
+    ответ снимал бы «думает». Флаг принадлежит последнему запросу.
+  */
+  it('устаревший ответ не снимает «думает» с нового запроса', async () => {
+    const releases: Array<(text: string) => void> = []
+    const fetch = vi.fn(() => new Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>(resolve => {
+      releases.push(text => resolve({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: text } }] }) }))
+    }))
+    withModel(fetch)
+    s().startInterview('first-line')
+    const old = s().answerInterview('Работал в поддержке на учёбе.')
+    s().startInterview('first-line')
+    const current = s().answerInterview('Учился на курсах, нравится помогать людям.')
+
+    releases[0]!('Старая реакция')
+    await old
+    expect(s().interviewBusy, 'новый запрос ещё думает').toBe(true)
+
+    releases[1]!('Хорошо, спасибо.')
+    await current
+    expect(s().interviewBusy).toBe(false)
+    expect(s().interview!.transcript.map(l => l.text)).toContain('Хорошо, спасибо.')
   })
 
   it('законченное интервью записано и открыто', async () => {
