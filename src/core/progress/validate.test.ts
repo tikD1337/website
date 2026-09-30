@@ -17,7 +17,7 @@ function rec(over: Partial<TicketRecord> = {}): TicketRecord {
 }
 
 function progress(records: TicketRecord[]): Progress {
-  return { version: 1, records, kb: [], learning: { checks: [], quizzes: [] } }
+  return { version: 1, records, kb: [], learning: { checks: [], quizzes: [] }, interviews: [] }
 }
 
 const codes = (raw: unknown) => validateProgress(raw as never).map(e => e.code)
@@ -66,7 +66,7 @@ describe('разбор прочитанного из хранилища', () => 
   it('прогресс прошлого формата без статей читается; битая статья — ошибка', () => {
     const old = { version: 1, records: [rec()] }
     expect(validateProgress(old)).toEqual([])
-    expect(normalizeProgress(old as Progress)).toEqual({ ...old, kb: [], learning: { checks: [], quizzes: [] } })
+    expect(normalizeProgress(old as Progress)).toEqual({ ...old, kb: [], learning: { checks: [], quizzes: [] }, interviews: [] })
 
     const article = {
       id: 'KB-0001', scenarioId: 's', title: 'Нет сети', type: 'network', body: 'текст',
@@ -124,6 +124,43 @@ describe('разбор прочитанного из хранилища', () => 
     ]
     for (const [name, learning] of broken) {
       expect(codes({ ...old, learning }), name).toEqual(['bad_learning'])
+    }
+  })
+
+  /*
+    Запись проверяется до последнего поля, которое читает разбор: урок
+    среза 6В — «массив», проверенный без элементов, ронял интерфейс.
+  */
+  it('интервью: прошлый формат читается, битое — ошибка', () => {
+    const old = { version: 1, records: [], kb: [], learning: { checks: [], quizzes: [] } }
+    expect(validateProgress(old)).toEqual([])
+    expect(normalizeProgress(old as unknown as Progress).interviews).toEqual([])
+
+    const item = {
+      id: 'apipa', stage: 'technical', prompt: 'Что значит 169.254?', answers: ['DHCP не ответил'],
+      covered: ['dhcp'], missing: ['release'], score: 0.5, expected: 'Образец.',
+    }
+    const record = {
+      id: 'first-line:2026-09-30T10:00:00.000Z', track: 'first-line', at: '2026-09-30T10:00:00.000Z', attempt: 0,
+      result: { verdict: 'maybe', intro: 1, technical: 0.5, experience: 0, questionsAsked: 1, items: [item] },
+    }
+    expect(codes({ ...old, interviews: [record] }), 'целая').toEqual([])
+
+    const broken: Array<[string, unknown]> = [
+      ['не массив', {}],
+      ['запись null', [null]],
+      ['без трека', [{ ...record, track: 1 }]],
+      ['попытка не число', [{ ...record, attempt: '0' }]],
+      ['вердикт чужой', [{ ...record, result: { ...record.result, verdict: 'yes' } }]],
+      ['доля не число', [{ ...record, result: { ...record.result, technical: '0.5' } }]],
+      ['пункты не массив', [{ ...record, result: { ...record.result, items: 'x' } }]],
+      ['вопрос null', [{ ...record, result: { ...record.result, items: [null] } }]],
+      ['ответы не строки', [{ ...record, result: { ...record.result, items: [{ ...item, answers: [{}] }] } }]],
+      ['пропущенные не строки', [{ ...record, result: { ...record.result, items: [{ ...item, missing: [1] }] } }]],
+      ['без образцового ответа', [{ ...record, result: { ...record.result, items: [{ ...item, expected: undefined }] } }]],
+    ]
+    for (const [name, interviews] of broken) {
+      expect(codes({ ...old, interviews }), name).toEqual(['bad_interview'])
     }
   })
 })

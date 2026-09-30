@@ -1,6 +1,7 @@
 import type { Scorecard } from '../grading/grade'
 import type { KbArticle } from '../kb/types'
 import type { Learning } from '../learning/types'
+import type { InterviewRecord } from '../interview/types'
 import type { ResolutionCode } from '../tickets/types'
 
 /**
@@ -67,8 +68,13 @@ export interface Progress {
    * «ничего не пройдено».
    */
   learning: Learning
+  /**
+   * Попытки интервью (срез 7Б) с разбором. Поле добавочное: прогресс
+   * без него читается как «интервью не было».
+   */
+  interviews: InterviewRecord[]
 }
 
 export function emptyProgress(): Progress {
-  return { version: 1, records: [], kb: [], learning: { checks: [], quizzes: [] } }
+  return { version: 1, records: [], kb: [], learning: { checks: [], quizzes: [] }, interviews: [] }
 }

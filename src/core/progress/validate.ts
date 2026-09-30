@@ -29,7 +29,7 @@ export function validateProgress(raw: unknown): ValidationError[] {
     return [{ code: 'bad_shape', message: 'прочитано не похоже на прогресс' }]
   }
 
-  const progress = raw as { version?: unknown; records?: unknown; kb?: unknown; learning?: unknown }
+  const progress = raw as { version?: unknown; records?: unknown; kb?: unknown; learning?: unknown; interviews?: unknown }
 
   if (progress.version !== 1) {
     errors.push({
@@ -94,7 +94,36 @@ export function validateProgress(raw: unknown): ValidationError[] {
     errors.push({ code: 'bad_learning', message: 'испорченный прогресс обучения' })
   }
 
+  // Интервью (срез 7Б): запись проверяется до последнего поля, которое читает разбор.
+  if (progress.interviews !== undefined
+    && !(Array.isArray(progress.interviews) && progress.interviews.every(isInterviewRecord))) {
+    errors.push({ code: 'bad_interview', message: 'испорченная запись интервью' })
+  }
+
   return errors
+}
+
+const VERDICTS = ['hire', 'maybe', 'no']
+const isStrings = (v: unknown) => Array.isArray(v) && v.every(isString)
+
+function isInterviewRecord(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null) return false
+  const r = raw as Record<string, unknown>
+  if (!isString(r['id']) || !isString(r['track']) || !isString(r['at']) || typeof r['attempt'] !== 'number') return false
+  const res = r['result']
+  if (typeof res !== 'object' || res === null) return false
+  const x = res as Record<string, unknown>
+  return VERDICTS.includes(x['verdict'] as string)
+    && ['intro', 'technical', 'experience', 'questionsAsked'].every(k => typeof x[k] === 'number')
+    && Array.isArray(x['items']) && x['items'].every(isQuestionResult)
+}
+
+function isQuestionResult(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null) return false
+  const q = raw as Record<string, unknown>
+  return isString(q['id']) && isString(q['stage']) && isString(q['prompt']) && isString(q['expected'])
+    && typeof q['score'] === 'number'
+    && isStrings(q['answers']) && isStrings(q['covered']) && isStrings(q['missing'])
 }
 
 function isLearning(raw: unknown): boolean {
@@ -147,12 +176,13 @@ function isArticle(raw: unknown): boolean {
     && Array.isArray(a['history']) && a['history'].every(isVersion)
 }
 
-/** Проверенный прогресс прошлого формата получает пустую базу знаний и пустое обучение. */
+/** Проверенный прогресс прошлого формата получает пустые базу знаний, обучение и интервью. */
 export function normalizeProgress(p: Progress): Progress {
   return {
     ...p,
     kb: Array.isArray(p.kb) ? p.kb : [],
     learning: p.learning ?? { checks: [], quizzes: [] },
+    interviews: Array.isArray(p.interviews) ? p.interviews : [],
   }
 }
 
