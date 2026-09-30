@@ -11,8 +11,8 @@ describe('курсы', () => {
   */
   it('курсы проходят загрузчик и ссылаются на библиотеку', () => {
     expect(() => validateCourses(COURSES, SCENARIOS.map(s => s.id))).not.toThrow()
-    expect(firstLine.sections.map(s => s.id)).toEqual(['process', 'network'])
-    expect(firstLine.sections.map(s => [s.lessons.length, s.quiz.length])).toEqual([[4, 5], [4, 5]])
+    expect(firstLine.sections.map(s => s.id)).toEqual(['process', 'network', 'accounts', 'workplace'])
+    expect(firstLine.sections.map(s => [s.lessons.length, s.quiz.length])).toEqual([[4, 5], [4, 5], [4, 5], [4, 5]])
     expect(firstLine.sections.flatMap(s => s.lessons).every(l => l.checks.length >= 3 && l.practice)).toBe(true)
   })
 })
