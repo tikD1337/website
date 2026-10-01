@@ -6,11 +6,17 @@
  */
 export type LimitKind = 'capsule' | 'content' | 'interview' | 'any'
 
-/** Запас и скорость пополнения: жетонов в миллисекунду. */
+/**
+ * Запас и скорость пополнения: жетонов в миллисекунду.
+ *
+ * Против скрипта, а не против человека: каждая перезагрузка — новая
+ * смена и три капсулы, и при 12 капсулах и одной в минуту четыре
+ * перезагрузки подряд запирали тренажёр на минуты (найдено в браузере).
+ */
 const LIMITS: Record<LimitKind, { burst: number; perMs: number }> = {
-  capsule: { burst: 12, perMs: 1 / 60_000 },
-  content: { burst: 20, perMs: 2 / 60_000 },
-  interview: { burst: 3, perMs: 1 / 300_000 },
+  capsule: { burst: 30, perMs: 1 / 20_000 },
+  content: { burst: 40, perMs: 1 / 15_000 },
+  interview: { burst: 6, perMs: 1 / 120_000 },
   any: { burst: 120, perMs: 2 / 1_000 },
 }
 

@@ -79,16 +79,21 @@ describe('HTTP-обработчик', () => {
     expect((await handler(new Request('http://x/api/catalog'))).status, 'после всего — жив').toBe(200)
   })
 
-  it('лимит капсул: двенадцать подряд, тринадцатая — 429, через минуту снова можно', async () => {
+  /*
+    Найдено в браузере: при 12 капсулах и одной в минуту четыре
+    перезагрузки подряд (каждая — новая смена, три капсулы) запирали
+    тренажёр на минуты. Лимит — против скрипта, а не против F5.
+  */
+  it('лимит капсул: тридцать подряд, тридцать первая — 429, через 20 секунд снова можно', async () => {
     let t = now()
     const h = createHandler(testContent(), { now: () => t })
     const capsule = () => post('/api/scenario/capsule', JSON.stringify({ id: 'net-apipa-no-lease' }))
-    for (let i = 0; i < 12; i++) expect((await h(capsule(), '1.2.3.4')).status, `капсула ${i + 1}`).toBe(200)
+    for (let i = 0; i < 30; i++) expect((await h(capsule(), '1.2.3.4')).status, `капсула ${i + 1}`).toBe(200)
     const r = await h(capsule(), '1.2.3.4')
     expect(r.status).toBe(429)
-    expect(r.headers.get('Retry-After')).toBe('60')
+    expect(r.headers.get('Retry-After')).toBe('20')
     expect((await h(capsule(), '5.6.7.8')).status, 'другой адрес — своя корзина').toBe(200)
-    t += 60_000
+    t += 20_000
     expect((await h(capsule(), '1.2.3.4')).status).toBe(200)
   })
 })
