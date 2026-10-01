@@ -4,6 +4,9 @@ import { hasShareAccess } from './core/directory/accounts'
 import { defaultConfig } from './core/dialogue/types'
 import { SCENARIOS } from './scenarios'
 import { relatedTo } from './core/kb/search'
+import { courseState } from './core/learning/state'
+import { firstLine } from './courses/first-line'
+import type { Answer, Check } from './core/learning/types'
 import type { FetchLike } from './core/dialogue/openai'
 
 /**
@@ -667,5 +670,74 @@ describe('база знаний', () => {
     expect(s().progress.kb).toHaveLength(1)
     expect(s().progress.kb[0]).toMatchObject({ version: 1 })
     expect(s().progress.kb[0]!.sources).toHaveLength(2)
+  })
+})
+
+describe('курсы', () => {
+  it('секция проходится целиком и открывает следующую; урок ведёт на свой тикет', () => {
+    const g = createGameStore({ now: () => new Date('2026-09-30T10:00:00.000Z') })
+    const s = () => g.getState()
+    const right = (c: Check): Answer => (c.kind === 'choice' ? c.options.findIndex(o => o.correct) : c.accept[0]!)
+    const process = firstLine.sections[0]!
+
+    for (const l of process.lessons) {
+      for (const c of l.checks) expect(s().answerCheck('first-line', 'process', l.id, c.id, right(c))).toMatchObject({ correct: true })
+    }
+    const answers = Object.fromEntries(process.quiz.map(q => [q.id, right(q)]))
+    expect(s().submitQuiz('first-line', 'process', answers)).toMatchObject({ ok: true, grade: { score: 5, passed: true } })
+    expect(courseState(firstLine, s().progress.learning).sections.map(x => x.status))
+      .toEqual(['open', 'open', 'locked', 'locked'])
+
+    // Урок «DHCP и самоназначенный адрес» ведёт на тикет APIPA.
+    expect(s().practice(firstLine.sections[1]!.lessons[1]!.practice!)).toEqual({ status: 'opened' })
+    s().runCommand('ipconfig /release')
+    s().runCommand('ipconfig /renew')
+    s().confirmWithUser()
+    s().saveResolutionNotes('ipconfig /release и ipconfig /renew выдали адрес, заявитель подтвердил.')
+    s().setResolutionCode('solved')
+    s().resolveTicket()
+    expect(s().progress.records.map(r => r.scenarioId)).toEqual(['net-apipa-no-lease'])
+  })
+})
+
+describe('интервью', () => {
+  it('без модели: от знакомства до вердикта, опыт по закрытому тикету', async () => {
+    const s = play('net-apipa-no-lease', '2026-09-30T10:00:00.000Z')
+    s().runCommand('ipconfig /all')
+    s().runCommand('ipconfig /release')
+    s().runCommand('ipconfig /renew')
+    s().confirmWithUser()
+    close(s, 'ipconfig /all показал 169.254.23.11; ipconfig /release и ipconfig /renew выдали адрес, заявитель подтвердил.')
+
+    expect(s().startInterview('first-line')).toEqual({ ok: true })
+    const answers = [
+      'Работал в поддержке на учёбе, нравится разбираться и помогать людям.',
+      'Это значит, что DHCP не ответил.',
+      'Сначала ipconfig /release, потом /renew; если снова — смотрю порт и VLAN.',
+      'Сверю личность контрольным вопросом, разблокирую учётку и найду источник в журнале — обычно телефон со старым паролем.',
+      'Откажу: пароль меняю только владельцу после сверки личности; если нужны данные — через руководителя выдать доступ.',
+      'Добавлю в группу отдела, попрошу выйти и войти заново, проверю whoami /groups и что папка открывается.',
+      'Сначала журнал событий — почему упала; если отключена, верну тип запуска через sc config и запущу; причину — драйвер — передам на вторую линию.',
+      'Причина — DHCP не ответил, адрес был 169.254. Нашёл через ipconfig /all, сделал release и renew, заявитель подтвердил, что сайты открываются.',
+    ]
+    for (const a of answers) await s().answerInterview(a)
+    expect(s().interview!.stage).toBe('questions')
+    await s().askInterviewer('Какой у вас график смен?')
+    expect(s().interview!.transcript.at(-1)!.text)
+      .toBe('Две смены по будням: с восьми до пяти и с одиннадцати до восьми. В выходные — дежурства по графику, раз в месяц.')
+
+    const { result } = s().finishInterview()!
+    expect(result).toMatchObject({ verdict: 'hire', intro: 1, technical: 1, experience: 1, questionsAsked: 1 })
+    expect(result.items.map(i => [i.id, i.answers.length, i.missing])).toEqual([
+      ['intro', 1, []],
+      ['apipa', 2, []],  // первый ответ — только DHCP, прозвучало уточнение
+      ['lockout', 1, []],
+      ['colleague', 1, []],
+      ['share', 1, []],
+      ['service', 1, []],
+      ['exp-apipa', 1, []],
+    ])
+    expect(result.items.at(-1)!.prompt).toBe('Вы закрывали тикет «Не открываются сайты — нет доступа в сеть». '
+      + 'Расскажите: в чём была причина, как вы её нашли и как убедились, что всё работает?')
   })
 })

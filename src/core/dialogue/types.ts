@@ -87,6 +87,27 @@ export interface DialogueReply {
   notice?: string
 }
 
+/**
+ * Реплика интервьюера.
+ *
+ * Модели уходят только имя интервьюера, факты о компании, текст
+ * заданного вопроса и реплики — пунктов чек-листа и образцовых ответов
+ * здесь нет и быть не может: интервьюер, знающий ответ, подсказывает
+ * его уточнением. `fallback` — что сказать без модели: движок интервью
+ * считает его сам, разъём лишь выбирает источник.
+ */
+export interface InterviewRequest {
+  /** реакция на ответ кандидата или ответ на его вопрос */
+  purpose: 'react' | 'answer'
+  interviewer: string
+  company: string[]
+  /** вопрос, на который кандидат отвечал; `null` — этап вопросов кандидата */
+  question: string | null
+  said: string
+  history: Array<{ speaker: 'interviewer' | 'candidate'; text: string }>
+  fallback: string
+}
+
 export interface DialoguePort {
   reply(req: DialogueRequest): Promise<DialogueReply>
 }

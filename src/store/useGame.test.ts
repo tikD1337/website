@@ -12,6 +12,9 @@ import { apipaNoLease } from '../scenarios/net-apipa-no-lease'
 import { SCENARIOS } from '../scenarios'
 import { HANDOFF_REPLY } from '../core/dialogue/scripted'
 import type { Scenario } from '../core/scenario/types'
+import type { Answer, Check, Lesson, Section } from '../core/learning/types'
+import { firstLine } from '../courses/first-line'
+import { defaultConfig } from '../core/dialogue/types'
 
 let g: ReturnType<typeof createGameStore>
 const s = () => g.getState()
@@ -549,5 +552,169 @@ describe('база знаний', () => {
     s().claimTicket(nextOpen().number)
     s().openArticle('KB-0001')
     expect(s().session.inspected).toContain('kb:kb-0001')
+  })
+})
+
+describe('курсы', () => {
+  const course = firstLine
+  const process = course.sections[0]!
+  /** Верный ответ проверки — выводится из контента, а не подбирается. */
+  const right = (c: Check): Answer => (c.kind === 'choice' ? c.options.findIndex(o => o.correct) : c.accept[0]!)
+  const wrong = (c: Check): Answer => (c.kind === 'choice' ? c.options.findIndex(o => !o.correct) : 'не то')
+  const passLessons = (sec: Section) => {
+    for (const l of sec.lessons) for (const c of l.checks) s().answerCheck(course.id, sec.id, l.id, c.id, right(c))
+  }
+
+  it('ответ пишется только в открытом уроке; квиз — в хранилище', () => {
+    const [l1, l2] = process.lessons as [Lesson, Lesson]
+    const k = l1.checks[0]!
+
+    expect(s().answerCheck(course.id, process.id, l1.id, k.id, wrong(k))).toMatchObject({ ok: true, correct: false })
+    expect(s().progress.learning.checks, 'неверный ответ не пишется').toEqual([])
+    expect(s().answerCheck(course.id, process.id, l1.id, k.id, right(k))).toMatchObject({ ok: true, correct: true })
+    expect(s().progress.learning.checks).toEqual(['first-line/process/ownership/first-step'])
+
+    // Правило живёт в сторе: спрятанная кнопка защищает только от мыши.
+    expect(s().answerCheck(course.id, process.id, l2.id, l2.checks[0]!.id, right(l2.checks[0]!)))
+      .toEqual({ ok: false, error: 'урок закрыт' })
+    expect(s().submitQuiz(course.id, process.id, {})).toEqual({ ok: false, error: 'квиз закрыт' })
+    expect(s().answerCheck('nope', process.id, l1.id, k.id, 0)).toEqual({ ok: false, error: 'курс не найден' })
+    expect(s().answerCheck(course.id, process.id, 'nope', k.id, 0)).toEqual({ ok: false, error: 'урок не найден' })
+    expect(s().progress.learning.checks).toHaveLength(1)
+
+    passLessons(process)
+    const answers = Object.fromEntries(process.quiz.map((q, i) => [q.id, i < 3 ? right(q) : wrong(q)]))
+    expect(s().submitQuiz(course.id, process.id, answers)).toMatchObject({ ok: true, grade: { score: 3, total: 5, passed: false } })
+    const saved = vi.mocked(saveProgress).mock.calls.at(-1)![0]
+    expect(saved.learning.quizzes).toEqual([{ id: 'first-line/process', attempts: 1, best: 3, total: 5, passedAt: null }])
+    expect(saved.learning.checks).toHaveLength(process.lessons.flatMap(l => l.checks).length)
+    // Запись проверяется перед сохранением и молча не пишется, если проверка не прошла.
+    expect(validateProgress(saved)).toEqual([])
+  })
+
+  it('практика открывает тикет по правилам очереди', () => {
+    // Блокировка в окне смены, ничего не взято — тикет берётся.
+    expect(s().practice('identity-account-lockout')).toEqual({ status: 'opened' })
+    const taken = s().queue.assigned!
+    expect(s().queue.tickets.find(t => t.number === taken)!.scenarioId).toBe('identity-account-lockout')
+    expect(s().activeTool).toBe('ticket')
+
+    // Тот же снова — тот же инцидент, журнал не сброшен.
+    s().runCommand('whoami')
+    s().setTool('courses')
+    expect(s().practice('identity-account-lockout')).toEqual({ status: 'opened' })
+    expect(s().session.commands.map(c => c.cmdline)).toEqual(['whoami'])
+
+    // В работе чужой — отказ словами очереди, мир и журнал не тронуты.
+    expect(s().practice('net-apipa-no-lease')).toEqual({ status: 'blocked', error: 'сначала завершите текущий тикет' })
+    expect(s().queue.assigned).toBe(taken)
+    expect(s().practice('no-such-scenario')).toEqual({ status: 'blocked', error: 'сценарий не найден' })
+  })
+
+  it('сценария нет в окне: новая смена только с подтверждением, отложенный тикет назван', () => {
+    const dock = SCENARIOS.find(x => x.id === 'hw-dock-failed')!
+    g = createGameStore(clockAt('2026-09-28T09:00:00.000Z'), undefined, 1, [dock, apipaNoLease])
+    const dockNumber = firstNumber()
+    s().claimTicket(dockNumber)
+    s().createShipment({ type: 'dock-monitor-swap', assetTag: 'AL-P2040' })
+    expect(s().waitForShipment()).toEqual({ ok: true })
+    s().openLearn({ course: course.id, section: 'network', lesson: 'dhcp-apipa' })
+    const world = s().world
+
+    expect(s().practice('net-apipa-no-lease')).toEqual({ status: 'needs-new-shift', lost: [dockNumber] })
+    expect(s().world, 'без подтверждения смена не меняется').toBe(world)
+
+    expect(s().practice('net-apipa-no-lease', true)).toEqual({ status: 'opened' })
+    expect(s().world).not.toBe(world)
+    expect(s().queue.tickets.find(t => t.number === s().queue.assigned)!.scenarioId).toBe('net-apipa-no-lease')
+    expect(s().parked).toEqual({})
+    expect(s().learnAt).toEqual({ course: course.id, section: 'network', lesson: 'dhcp-apipa' })
+  })
+})
+
+describe('интервью', () => {
+  /** Модель, которая отвечает, когда её отпустят. */
+  const heldModel = () => {
+    let release: (text: string) => void = () => {}
+    const fetch = vi.fn(() => new Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>(resolve => {
+      release = text => resolve({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: text } }] }) })
+    }))
+    return { fetch, release: (text: string) => release(text) }
+  }
+  const withModel = (fetch: ReturnType<typeof heldModel>['fetch']) => {
+    g = createGameStore(clockAt('2026-09-30T10:00:00.000Z'), { fetch })
+    s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
+  }
+  const candidateLines = () => s().interview!.transcript.filter(l => l.speaker === 'candidate').map(l => l.text)
+
+  it('пустой ответ и ответ во время раздумий не записываются', async () => {
+    const model = heldModel()
+    withModel(model.fetch)
+    s().startInterview('first-line')
+    await s().answerInterview('   ')
+    expect(candidateLines(), 'пустой').toEqual([])
+
+    const first = s().answerInterview('Работал в поддержке на учёбе.')
+    expect(s().interviewBusy).toBe(true)
+    await s().answerInterview('Второй ответ поверх первого')
+    expect(candidateLines(), 'во время раздумий').toEqual(['Работал в поддержке на учёбе.'])
+    model.release('Спасибо, понятно.')
+    await first
+    expect(s().interviewBusy).toBe(false)
+    expect(s().interview!.transcript.at(-2)!.text).toBe('Спасибо, понятно.')
+  })
+
+  it('ответ, пришедший в брошенное интервью, отбрасывается', async () => {
+    const model = heldModel()
+    withModel(model.fetch)
+    s().startInterview('first-line')
+    const pending = s().answerInterview('Работал в поддержке на учёбе.')
+    s().startInterview('first-line')
+    const fresh = s().interview
+    model.release('Старая реакция')
+    await pending
+    expect(s().interview, 'новое интервью не тронуто').toBe(fresh)
+    expect(s().interview!.transcript.map(l => l.text)).not.toContain('Старая реакция')
+    expect(s().interviewBusy, 'флаг «думает» сброшен новым началом, а не залип').toBe(false)
+  })
+
+  /*
+    Обзор среза 7Б предлагал сбрасывать «думает» и при отброшенном
+    ответе. Это открыло бы ввод посреди чужого запроса: вы начали
+    заново и ответили, модель думает над новым ответом — и старый
+    ответ снимал бы «думает». Флаг принадлежит последнему запросу.
+  */
+  it('устаревший ответ не снимает «думает» с нового запроса', async () => {
+    const releases: Array<(text: string) => void> = []
+    const fetch = vi.fn(() => new Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>(resolve => {
+      releases.push(text => resolve({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: text } }] }) }))
+    }))
+    withModel(fetch)
+    s().startInterview('first-line')
+    const old = s().answerInterview('Работал в поддержке на учёбе.')
+    s().startInterview('first-line')
+    const current = s().answerInterview('Учился на курсах, нравится помогать людям.')
+
+    releases[0]!('Старая реакция')
+    await old
+    expect(s().interviewBusy, 'новый запрос ещё думает').toBe(true)
+
+    releases[1]!('Хорошо, спасибо.')
+    await current
+    expect(s().interviewBusy).toBe(false)
+    expect(s().interview!.transcript.map(l => l.text)).toContain('Хорошо, спасибо.')
+  })
+
+  it('законченное интервью записано и открыто', async () => {
+    s().startInterview('first-line')
+    while (s().interview!.stage !== 'questions') await s().answerInterview('не знаю')
+    await s().askInterviewer('Какой у вас график смен?')
+    const record = s().finishInterview()!
+
+    expect(s()).toMatchObject({ interview: null, interviewOpen: record.id, activeTool: 'interview' })
+    expect(record).toMatchObject({ track: 'first-line', attempt: 0, result: { verdict: 'no', questionsAsked: 1 } })
+    const saved = vi.mocked(saveProgress).mock.calls.at(-1)![0]
+    expect(saved.interviews).toEqual([record])
+    expect(validateProgress(saved)).toEqual([])
   })
 })

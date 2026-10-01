@@ -1,4 +1,4 @@
-import { buildMessages, GENERATION } from './prompt'
+import { buildMessages, GENERATION, type ChatMessage } from './prompt'
 import { sanitizeReply } from './sanitize'
 import type { DialogueConfig, DialogueRequest } from './types'
 
@@ -66,6 +66,21 @@ export async function askModel(
   cfg: DialogueConfig,
   doFetch: FetchLike,
 ): Promise<ModelResult> {
+  return askChat(buildMessages(req), cfg, doFetch)
+}
+
+/**
+ * Запрос к модели с готовыми сообщениями.
+ *
+ * Отделён от сборки промпта, чтобы интервьюер шёл тем же путём, что и
+ * заявитель: те же таймаут, проверка ответа и деление отказов на
+ * «недоступна» и «ответила негодно». Роли разные, клиент один.
+ */
+export async function askChat(
+  messages: ChatMessage[],
+  cfg: DialogueConfig,
+  doFetch: FetchLike,
+): Promise<ModelResult> {
   const url = `${cfg.baseUrl.replace(/\/+$/, '')}/chat/completions`
 
   /*
@@ -86,7 +101,7 @@ export async function askModel(
       headers,
       body: JSON.stringify({
         model: cfg.model,
-        messages: buildMessages(req),
+        messages,
         ...GENERATION,
         stream: false,
       }),

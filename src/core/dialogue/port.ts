@@ -1,8 +1,9 @@
 import { scriptedReply } from './scripted'
 import { detectIntent } from './intent'
-import { askModel, type FetchLike } from './openai'
+import { askChat, askModel, type FetchLike } from './openai'
+import { interviewMessages } from './interviewPrompt'
 import type {
-  DialogueConfig, DialoguePort, DialogueReply, DialogueRequest,
+  DialogueConfig, DialoguePort, DialogueReply, DialogueRequest, InterviewRequest,
 } from './types'
 
 /**
@@ -32,6 +33,11 @@ export interface Dialogue extends DialoguePort {
   tripped(): boolean
   /** Проверка соединения из экрана настроек. */
   probe(): Promise<{ ok: boolean; error?: string }>
+  /**
+   * Реплика интервьюера. Тот же режим, размыкатель и проверка ответа,
+   * что у заявителя; без модели — заготовка, которую передал движок.
+   */
+  interview(req: InterviewRequest): Promise<DialogueReply>
 }
 
 const PROBE: DialogueRequest = {
@@ -138,6 +144,18 @@ export function createDialogue(deps: DialogueDeps): Dialogue {
         ...scriptedReply(req),
         notice: `${r.error}. Отвечают реплики сценария.`,
       }
+    },
+
+    async interview(req: InterviewRequest): Promise<DialogueReply> {
+      const scripted: DialogueReply = { text: req.fallback, source: 'scripted' }
+      if (!modelEnabled()) return scripted
+      if (broken) return { ...scripted, notice: 'Модель недоступна — отвечают заготовки.' }
+
+      const r = await askChat(interviewMessages(req), cfg, doFetch!)
+      if (r.ok) return { text: r.text, source: 'model' }
+      // Размыкатель — как у заявителя: только недоступность, а не негодная реплика.
+      if (r.unusable !== true) broken = true
+      return { ...scripted, notice: `${r.error}. Отвечают заготовки.` }
     },
 
     async probe() {

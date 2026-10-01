@@ -12,6 +12,21 @@ import { STAGES } from '../core/logistics/types'
 import { draftFrom } from '../core/kb/draft'
 import { editArticle as editKb, setStatus as setKbStatus, type KbResult } from '../core/kb/edit'
 import { mergeKb } from '../core/kb/search'
+import { COURSES } from '../courses'
+import { validateCourses } from '../core/learning/validate'
+import { checkAnswer, gradeQuiz, type QuizGrade } from '../core/learning/answer'
+import {
+  courseState, recordCheck, recordQuiz, mergeLearning, checkPath, quizPath,
+} from '../core/learning/state'
+import type { Answer, Course, Learning } from '../core/learning/types'
+import { INTERVIEWS } from '../interviews'
+import { validateInterviews } from '../core/interview/validate'
+import {
+  startInterview as beginInterview, answer as answerQuestion, say, askInterviewer as askQuestion,
+  faqReply, reaction, finishQuestions, questionText, type Solved,
+} from '../core/interview/flow'
+import { gradeInterview } from '../core/interview/grade'
+import type { InterviewRecord, InterviewRun, InterviewTrack } from '../core/interview/types'
 import type { KbArticle, KbStatus, KbType } from '../core/kb/types'
 import {
   createQueueGenerator, fillQueue, SHIFT_WINDOW,
@@ -73,7 +88,23 @@ import {
 
 export type Tool =
   | 'queue' | 'ticket' | 'terminal' | 'directory' | 'serverroom' | 'assets' | 'logistics' | 'kb' | 'comms'
-  | 'settings' | 'scorecard' | 'history' | 'profile'
+  | 'settings' | 'scorecard' | 'history' | 'profile' | 'courses' | 'interview'
+
+/** Где остановился ученик: курс, секция, урок или квиз секции. */
+export interface LearnAt {
+  course: string
+  section?: string
+  lesson?: string
+  quiz?: true
+}
+
+export type AnswerResult = { ok: true; correct: boolean; why: string | null } | { ok: false; error: string }
+export type QuizSubmit = { ok: true; grade: QuizGrade } | { ok: false; error: string }
+export type PracticeResult =
+  | { status: 'opened' }
+  | { status: 'blocked'; error: string }
+  /** тикета в окне нет; новая смена забудет отложенные тикеты `lost` */
+  | { status: 'needs-new-shift'; lost: string[] }
 
 export interface TerminalLine {
   kind: 'prompt' | 'output' | 'notice'
@@ -249,6 +280,40 @@ export interface GameState {
   closeViewing(): void
   /** стереть прогресс: необратимо, живёт в настройках, а не в reset */
   wipeProgress(): void
+
+  /** библиотека курсов — проверена загрузчиком при создании стора */
+  courses: Course[]
+  /** где остановился ученик; переживает смену и переход к тикету */
+  learnAt: LearnAt | null
+  openLearn(at: LearnAt | null): void
+  answerCheck(course: string, section: string, lesson: string, check: string, answer: Answer): AnswerResult
+  submitQuiz(course: string, section: string, answers: Record<string, Answer>): QuizSubmit
+  /**
+   * Урок открывает свой тикет по правилам очереди: свой — открыть,
+   * чужой в работе — отказ, в окне смены — взять, иначе — новая смена,
+   * но только с подтверждением (`newShift`).
+   */
+  practice(scenarioId: string, newShift?: boolean): PracticeResult
+
+  /** треки интервью — проверены загрузчиком при создании стора */
+  tracks: InterviewTrack[]
+  /**
+   * Идущее интервью. От очереди, мира и `session` не зависит и их не
+   * трогает; незаконченное не сохраняется — как незакрытый тикет.
+   */
+  interview: InterviewRun | null
+  /** интервьюер «думает» — модель отвечает; новый ответ не принимается */
+  interviewBusy: boolean
+  /** почему ответил не модель, а заготовка */
+  interviewNotice: string | null
+  /** какой разбор интервью открыт */
+  interviewOpen: string | null
+  startInterview(track: string): { ok: true } | { ok: false; error: string }
+  answerInterview(text: string): Promise<void>
+  askInterviewer(text: string): Promise<void>
+  finishInterview(): InterviewRecord | null
+  abandonInterview(): void
+  openInterview(id: string | null): void
 }
 
 /** Вход на коммутатор по SSH — так начинается любой сеанс консоли. */
@@ -273,6 +338,8 @@ export function createGameStore(
   shiftWindow = SHIFT_WINDOW,
   /** библиотека сценариев; подменяется в тестах, которым нужен свой сценарий */
   library: Scenario[] = SCENARIOS,
+  courses: Course[] = COURSES,
+  tracks: InterviewTrack[] = INTERVIEWS,
 ): UseBoundStore<StoreApi<GameState>> {
   const registry = createRegistry()
   registry.register('ipconfig', ipconfig)
@@ -310,8 +377,16 @@ export function createGameStore(
 
   // Опечатка в сценарии падает при запуске, а не когда до него дойдёт очередь.
   validateScenarios(library)
+  /*
+    Курсы сверяются с каталогом сценариев, а не только с библиотекой
+    стора: тестам со своей библиотекой не нужны сценарии курса, а
+    опечатка в ссылке на практику всё равно падает здесь.
+  */
+  validateCourses(courses, [...new Set([...SCENARIOS, ...library].map(sc => sc.id))])
+  validateInterviews(tracks, [...new Set([...SCENARIOS, ...library].map(sc => sc.id))])
 
-  const fresh = () => {
+  /** `first` — сценарий, который новая смена ставит первым в пул: так урок открывает свою практику. */
+  const fresh = (first?: string) => {
     /*
       Мир начинается исправным и ломается по мере того, как тикеты
       входят в окно смены, — см. `fillQueue`. Сценарий, ждущий в пуле,
@@ -333,6 +408,7 @@ export function createGameStore(
     const shiftId = `SH-${stamp}-${shiftCounter}`
     generator.tickets = []
     generator.pool = library.map(s => s.id)
+    if (first) generator.pool = [first, ...generator.pool.filter(id => id !== first)]
     generator.exhausted = false
     generator.injected = []
     fillQueue(generator, library, world)
@@ -398,6 +474,13 @@ export function createGameStore(
           records: [...loaded.records, ...inMemory.records],
           // Черновик мог появиться до конца загрузки: слияние не повторит номер.
           kb: mergeKb(loaded.kb, inMemory.kb),
+          // Ответы, данные до конца загрузки, не теряются.
+          learning: mergeLearning(loaded.learning, inMemory.learning),
+          // Интервью, законченное до конца загрузки, дописывается после загруженных.
+          interviews: [
+            ...loaded.interviews,
+            ...inMemory.interviews.filter(r => !loaded.interviews.some(x => x.id === r.id)),
+          ],
         },
         progressLoaded: true,
       })
@@ -450,8 +533,26 @@ export function createGameStore(
       })
     }
 
+    /** Обучение правится синхронно, хранилище получает его следом. */
+    const commitLearning = (learning: Learning) => {
+      const progress = { ...get().progress, learning }
+      set({ progress })
+      void saveProgress(progress).catch(() => {
+        // Хранилище недоступно — прогресс обучения живёт в памяти до перезагрузки.
+      })
+    }
+
+    const findCourse = (id: string) => get().courses.find(c => c.id === id)
+
     return {
     ...fresh(),
+    courses,
+    learnAt: null,
+    tracks,
+    interview: null,
+    interviewBusy: false,
+    interviewNotice: null,
+    interviewOpen: null,
 
     /*
       Новая смена по кнопке «Пройти заново». Первую смену собирает
@@ -1360,6 +1461,179 @@ export function createGameStore(
       } catch {
         set({ progress: emptyProgress() })
       }
+    },
+
+    openLearn(at) {
+      set({ learnAt: at, activeTool: 'courses' })
+    },
+
+    answerCheck(courseId, sectionId, lessonId, checkId, answer) {
+      const course = findCourse(courseId)
+      if (!course) return { ok: false, error: 'курс не найден' }
+      const section = course.sections.find(x => x.id === sectionId)
+      const lesson = section?.lessons.find(x => x.id === lessonId)
+      const check = lesson?.checks.find(x => x.id === checkId)
+      if (!section || !lesson || !check) return { ok: false, error: 'урок не найден' }
+
+      // Правило живёт здесь, а не в кнопке: спрятанная кнопка защищает только от мыши.
+      const learning = get().progress.learning
+      const status = courseState(course, learning).sections
+        .find(x => x.id === section.id)!.lessons.find(x => x.id === lesson.id)!.status
+      if (status === 'locked') return { ok: false, error: 'урок закрыт' }
+
+      const verdict = checkAnswer(check, answer)
+      if (verdict.correct) {
+        const next = recordCheck(learning, checkPath(course.id, section.id, lesson.id, check.id))
+        if (next !== learning) commitLearning(next)
+      }
+      return { ok: true, ...verdict }
+    },
+
+    submitQuiz(courseId, sectionId, answers) {
+      const course = findCourse(courseId)
+      if (!course) return { ok: false, error: 'курс не найден' }
+      const section = course.sections.find(x => x.id === sectionId)
+      if (!section) return { ok: false, error: 'квиз не найден' }
+
+      const learning = get().progress.learning
+      const status = courseState(course, learning).sections.find(x => x.id === section.id)!.quiz
+      if (status === 'locked') return { ok: false, error: 'квиз закрыт' }
+
+      const grade = gradeQuiz(section.quiz, answers)
+      commitLearning(recordQuiz(learning, quizPath(course.id, section.id), grade, clock.now().toISOString()))
+      return { ok: true, grade }
+    },
+
+    practice(scenarioId, newShift = false) {
+      const st = get()
+      if (!library.some(sc => sc.id === scenarioId)) return { status: 'blocked', error: 'сценарий не найден' }
+
+      const inWindow = st.queue.tickets.find(t => t.scenarioId === scenarioId && t.status !== 'completed')
+      if (inWindow && st.queue.assigned === inWindow.number) {
+        st.claimTicket(inWindow.number)
+        return { status: 'opened' }
+      }
+      // Урок — не чёрный ход мимо правила «один в работе».
+      if (st.queue.assigned) return { status: 'blocked', error: 'сначала завершите текущий тикет' }
+      if (inWindow) {
+        st.claimTicket(inWindow.number)
+        return { status: 'opened' }
+      }
+
+      /*
+        Тикета этого сценария в окне нет. Вставить его сверх окна значило
+        бы нарушить окно смены; честный путь — новая смена с ним первым.
+        Она необратима: отложенные тикеты («Ждём поставку») забудутся, и
+        об этом говорится до подтверждения, а не после.
+      */
+      if (!newShift) {
+        const lost = st.queue.tickets.filter(t => t.status === 'pending-shipment').map(t => t.number)
+        return { status: 'needs-new-shift', lost }
+      }
+      const { progress, progressLoaded } = st
+      set({ ...fresh(scenarioId), progress, progressLoaded })
+      const ticket = get().queue.tickets.find(t => t.scenarioId === scenarioId)
+      if (!ticket) return { status: 'blocked', error: 'тикет не вошёл в новую смену' }
+      get().claimTicket(ticket.number)
+      return { status: 'opened' }
+    },
+
+    startInterview(trackId) {
+      const track = get().tracks.find(t => t.id === trackId)
+      if (!track) return { ok: false, error: 'трек интервью не найден' }
+      const { records, interviews } = get().progress
+      /*
+        Вопрос об опыте — про тикет, который вы закрывали. Провал сюда не
+        идёт: спрашивать «как вы нашли причину» про тикет, где причину не
+        нашли, значит подсказывать, что это был провал.
+      */
+      const solved: Solved[] = []
+      for (const r of records) {
+        if (r.card.verdict !== 'fail' && !solved.some(x => x.scenarioId === r.scenarioId)) {
+          solved.push({ scenarioId: r.scenarioId, summary: r.summary })
+        }
+      }
+      const attempt = interviews.filter(r => r.track === track.id).length
+      set({
+        interview: beginInterview(track, attempt, solved),
+        interviewBusy: false,
+        interviewNotice: null,
+        interviewOpen: null,
+        activeTool: 'interview',
+      })
+      return { ok: true }
+    },
+
+    async answerInterview(text) {
+      const st = get()
+      const run = st.interview
+      const said = text.trim()
+      // Пустой ответ и ответ поверх раздумий интервьюера не записываются.
+      if (!run || st.interviewBusy || !said || run.stage === 'questions' || run.stage === 'done') return
+      const track = st.tracks.find(t => t.id === run.track)!
+      const question = questionText(track, run, run.plan[run.index]!)
+      const { run: heard, next } = answerQuestion(track, run, said)
+      set({ interview: heard, interviewBusy: true, interviewNotice: null })
+
+      const candidateTurns = heard.transcript.filter(l => l.speaker === 'candidate').length
+      const r = await dialogue.interview({
+        purpose: 'react', interviewer: track.interviewer, company: track.company,
+        question, said, history: run.transcript, fallback: reaction(candidateTurns - 1),
+      })
+
+      /*
+        Пока модель думала, интервью могли бросить или начать заново.
+        Ответ, пришедший в изменившийся мир, отбрасывается: иначе реакция
+        из брошенного интервью дописалась бы в новое.
+      */
+      if (get().interview !== heard) return
+      let after = say(heard, r.text)
+      if (next) after = say(after, next)
+      set({ interview: after, interviewBusy: false, interviewNotice: r.notice ?? null })
+    },
+
+    async askInterviewer(text) {
+      const st = get()
+      const run = st.interview
+      const said = text.trim()
+      if (!run || st.interviewBusy || !said || run.stage !== 'questions') return
+      const track = st.tracks.find(t => t.id === run.track)!
+      const asked = askQuestion(run, said)
+      set({ interview: asked, interviewBusy: true, interviewNotice: null })
+
+      const r = await dialogue.interview({
+        purpose: 'answer', interviewer: track.interviewer, company: track.company,
+        question: null, said, history: run.transcript, fallback: faqReply(track, said),
+      })
+      if (get().interview !== asked) return
+      set({ interview: say(asked, r.text), interviewBusy: false, interviewNotice: r.notice ?? null })
+    },
+
+    finishInterview() {
+      const st = get()
+      const run = st.interview
+      if (!run || st.interviewBusy || run.stage !== 'questions') return null
+      const track = st.tracks.find(t => t.id === run.track)!
+      const at = clock.now().toISOString()
+      const record: InterviewRecord = {
+        id: `${track.id}:${at}`, track: track.id, at, attempt: run.attempt,
+        result: gradeInterview(track, finishQuestions(run)),
+      }
+      // Прогресс правится синхронно, хранилище получает его следом.
+      const progress = { ...st.progress, interviews: [...st.progress.interviews, record] }
+      set({ progress, interview: null, interviewOpen: record.id, activeTool: 'interview' })
+      void saveProgress(progress).catch(() => {
+        // Хранилище недоступно — запись живёт в памяти до перезагрузки.
+      })
+      return record
+    },
+
+    abandonInterview() {
+      set({ interview: null, interviewBusy: false, interviewNotice: null })
+    },
+
+    openInterview(id) {
+      set({ interviewOpen: id, activeTool: 'interview' })
     },
     }
   })
