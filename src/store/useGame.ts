@@ -1,8 +1,5 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand'
-import { validateScenarios } from '../core/scenario/load'
-import { allHold } from '../core/scenario/check'
 import { applyInject, createWorld } from '../core/world/world'
-import { SCENARIOS } from '../scenarios'
 import {
   createQueue, claim, setStatus, resolve, findTicket, park, resume,
 } from '../core/tickets/queue'
@@ -13,14 +10,12 @@ import { draftFrom } from '../core/kb/draft'
 import { editArticle as editKb, setStatus as setKbStatus, type KbResult } from '../core/kb/edit'
 import { mergeKb } from '../core/kb/search'
 import { COURSES } from '../courses'
-import { validateCourses } from '../core/learning/validate'
 import { checkAnswer, gradeQuiz, type QuizGrade } from '../core/learning/answer'
 import {
   courseState, recordCheck, recordQuiz, mergeLearning, checkPath, quizPath,
 } from '../core/learning/state'
 import type { Answer, Course, Learning } from '../core/learning/types'
 import { INTERVIEWS } from '../interviews'
-import { validateInterviews } from '../core/interview/validate'
 import {
   startInterview as beginInterview, answer as answerQuestion, say, askInterviewer as askQuestion,
   faqReply, reaction, finishQuestions, questionText, type Solved,
@@ -29,8 +24,15 @@ import { gradeInterview } from '../core/interview/grade'
 import type { InterviewRecord, InterviewRun, InterviewTrack } from '../core/interview/types'
 import type { KbArticle, KbStatus, KbType } from '../core/kb/types'
 import {
-  createQueueGenerator, fillQueue, SHIFT_WINDOW,
+  createQueueGenerator, fillQueue, planFill, SHIFT_WINDOW,
 } from '../core/tickets/generate'
+import {
+  settle, chain, all, isThenable, messageOf,
+  type Capsule, type Catalog, type ContentPort, type MaybePromise,
+} from '../content/port'
+// Временно, до сетевого разъёма (задача 9): контент ещё едет в бандле.
+import { createContentService } from '../content/server/service'
+import { LIBRARY } from '../content/server/library'
 import { createSession, setFlag, recordDialogue } from '../core/session/session'
 import { createRegistry } from '../core/terminal/registry'
 import { ipconfig } from '../core/terminal/commands/ipconfig'
@@ -41,7 +43,7 @@ import { sc } from '../core/terminal/commands/sc'
 import { net } from '../core/terminal/commands/net'
 import { dsquery } from '../core/terminal/commands/dsquery'
 import { whoami } from '../core/terminal/commands/whoami'
-import { gradeIncident, type Scorecard } from '../core/grading/grade'
+import type { Scorecard } from '../core/grading/grade'
 import {
   startService, stopService, setStartType, type OpResult,
 } from '../core/device/services'
@@ -77,7 +79,6 @@ import type { Clock, WorldState } from '../core/world/types'
 import type { SessionLog, DialogueChannel } from '../core/session/types'
 import type { QueueState } from '../core/tickets/queue'
 import type { WorkflowStatus, ResolutionCode } from '../core/tickets/types'
-import { metaOf, type Scenario } from '../core/scenario/types'
 import type { ServiceStartType } from '../core/world/types'
 import type { Progress, TicketRecord } from '../core/progress/types'
 import { emptyProgress } from '../core/progress/types'
@@ -134,7 +135,28 @@ export interface GameState {
   world: WorldState
   queue: QueueState
   session: SessionLog
-  scenarios: Scenario[]
+  /** каталог с сервера: карточки сценариев, оглавления курсов, треки; null — ещё не пришёл */
+  catalog: Catalog | null
+  /**
+   * Смена и пополнение очереди приходят с сервера (срез 8А).
+   *
+   * `error` называется словами (`contentError`) и чинится «Повторить»:
+   * молча пустая очередь читалась бы как поломка тренажёра.
+   */
+  contentStatus: 'loading' | 'ready' | 'error'
+  contentError: string | null
+  /**
+   * Тексты просьб, открытых расследованием в этом инциденте, по id.
+   *
+   * Принадлежат инциденту, как и журнал: в новом инциденте флаги
+   * сброшены, и текст, полученный раньше, был бы диагнозом на кнопке
+   * до расследования.
+   */
+  askTexts: Record<string, string>
+  /** оценка закрытия ушла на сервер и ещё не вернулась — второе закрытие не уходит */
+  grading: boolean
+  /** почему действие по тикету не прошло: сервер недоступен, подпись не принята */
+  ticketNotice: string | null
   activeTool: Tool
   terminalLines: TerminalLine[]
   /**
@@ -206,10 +228,14 @@ export interface GameState {
   runCommand(line: string): { rejected: boolean }
   saveResolutionNotes(text: string): void
   setResolutionCode(code: ResolutionCode): void
-  resolveTicket(): void
+  resolveTicket(): MaybePromise<void>
   verifyRequester(field: VerificationField, answer: string): VerificationResult
-  confirmWithUser(): void
-  askRequesterTo(askId: string): void
+  confirmWithUser(): MaybePromise<void>
+  askRequesterTo(askId: string): MaybePromise<void>
+  /** тексты просьб, открытых расследованием, — с сервера; уже полученные не просятся */
+  loadAskTexts(): MaybePromise<void>
+  /** повторить то, что не пришло с сервера: смену или пополнение очереди */
+  retryContent(): MaybePromise<void>
 
   setChannel(c: DialogueChannel): void
   /** снять трубку: выбрать собеседника из справочника */
@@ -293,7 +319,7 @@ export interface GameState {
    * чужой в работе — отказ, в окне смены — взять, иначе — новая смена,
    * но только с подтверждением (`newShift`).
    */
-  practice(scenarioId: string, newShift?: boolean): PracticeResult
+  practice(scenarioId: string, newShift?: boolean): MaybePromise<PracticeResult>
 
   /** треки интервью — проверены загрузчиком при создании стора */
   tracks: InterviewTrack[]
@@ -337,7 +363,8 @@ export function createGameStore(
   dialogueDeps?: { fetch?: Parameters<typeof createDialogue>[0]['fetch'] },
   shiftWindow = SHIFT_WINDOW,
   /** библиотека сценариев; подменяется в тестах, которым нужен свой сценарий */
-  library: Scenario[] = SCENARIOS,
+  /** разъём контента: сервис в тестах, сеть в приложении (задача 9) */
+  content: ContentPort = createContentService({ ...LIBRARY, sign: s => s, now: () => Date.now() }),
   courses: Course[] = COURSES,
   tracks: InterviewTrack[] = INTERVIEWS,
 ): UseBoundStore<StoreApi<GameState>> {
@@ -367,23 +394,101 @@ export function createGameStore(
     смены, а reset начинает новую смену с тем же генератором. Прогресс
     (история прохождений) сюда не попадает — он переживает смену.
   */
-  const generator = createQueueGenerator(library.map(s => s.id), shiftWindow)
-  const scenarioFor = (id: string): Scenario => {
-    const found = library.find(s => s.id === id)
-    if (!found) throw new Error(`сценарий не найден: ${id}`)
-    return found
-  }
+  const generator = createQueueGenerator([], shiftWindow)
   let shiftCounter = 0
 
-  // Опечатка в сценарии падает при запуске, а не когда до него дойдёт очередь.
-  validateScenarios(library)
   /*
-    Курсы сверяются с каталогом сценариев, а не только с библиотекой
-    стора: тестам со своей библиотекой не нужны сценарии курса, а
-    опечатка в ссылке на практику всё равно падает здесь.
+    Контент приходит с сервера (срез 8А): каталог — один раз на стор,
+    капсула — по тикету, когда он входит в окно смены. Капсула нужна и
+    после: в ней подпись, без которой сервер не ответит про этот тикет.
+    Библиотеки у браузера нет — её проверяет сервер при запуске.
   */
-  validateCourses(courses, [...new Set([...SCENARIOS, ...library].map(sc => sc.id))])
-  validateInterviews(tracks, [...new Set([...SCENARIOS, ...library].map(sc => sc.id))])
+  let catalog: Catalog | null = null
+  const capsules = new Map<string, Capsule>()
+  const capsuleOf = (id: string): Capsule => {
+    const c = capsules.get(id)
+    if (!c) throw new Error(`нет капсулы тикета: ${id}`)
+    return c
+  }
+  /** Смена, которую грузим сейчас: ответ, пришедший для прежней, отбрасывается. */
+  let liveShift = ''
+  /** Что повторит «Повторить»: упавшую загрузку смены или пополнение очереди. */
+  let retry: (() => MaybePromise<void>) | null = null
+  /** Загрузка новой смены — практика урока ждёт её, чтобы взять свой тикет. */
+  let pendingShift: Promise<void> | null = null
+  const STALE = Symbol('устарело')
+  /** set и get стора — для ответов, пришедших после инициализатора */
+  let api: { set: (p: Partial<GameState>) => void; get: () => GameState } | null = null
+
+  const loadCatalog = (): MaybePromise<Catalog> => catalog ?? chain(content.catalog(), c => (catalog = c))
+
+  /**
+   * План окна → капсулы входящих → наполнение.
+   *
+   * Мир ломается, только когда пришли капсулы всех входящих: сбой на
+   * полпути оставляет пул и очередь прежними. План пересчитывается после
+   * каждого ответа — пока капсулы шли, окно могло измениться.
+   */
+  const fillFrom = (worldOf: () => WorldState, shiftId: string): MaybePromise<void> => {
+    const metas = catalog!.scenarios
+    const missing = planFill(generator, metas).filter(id => !capsules.has(id))
+    if (missing.length === 0) {
+      fillQueue(generator, metas, worldOf(), id => capsuleOf(id).inject)
+      return
+    }
+    return chain(all(missing.map(id => content.capsule(id))), list => {
+      if (liveShift !== shiftId) throw STALE
+      for (const c of list) capsules.set(c.scenarioId, c)
+      return fillFrom(worldOf, shiftId)
+    })
+  }
+
+  /** Смена с сервера; результат — что положить в стор, `null` — смена уже другая. */
+  const loadShift = (
+    worldOf: () => WorldState, shiftId: string, first?: string,
+  ): MaybePromise<Partial<GameState> | null> => settle<void, Partial<GameState> | null>(
+    () => chain(loadCatalog(), cat => {
+      if (liveShift !== shiftId) throw STALE
+      generator.pool = cat.scenarios.map(x => x.id)
+      if (first) generator.pool = [first, ...generator.pool.filter(id => id !== first)]
+      return fillFrom(worldOf, shiftId)
+    }),
+    () => ({
+      catalog, queue: createQueue(generator.tickets), shiftExhausted: generator.exhausted,
+      contentStatus: 'ready' as const, contentError: null,
+    }),
+    e => {
+      if (e === STALE) return null
+      retry = () => chain(loadShift(worldOf, shiftId, first), applyShift(worldOf, shiftId))
+      return { catalog, contentStatus: 'error' as const, contentError: messageOf(e) }
+    },
+  )
+
+  /** Ответ для своей смены кладётся в стор; для прежней — отбрасывается. */
+  const applyShift = (worldOf: () => WorldState, shiftId: string) => (p: Partial<GameState> | null) => {
+    if (p && liveShift === shiftId) api!.set({ ...p, world: { ...worldOf() } })
+  }
+
+  /** Пополнение окна после закрытия или скрытия; сбой называется словами и повторяется. */
+  const refill = (): MaybePromise<void> => {
+    const { set, get } = api!
+    const shiftId = liveShift
+    return settle(
+      () => fillFrom(() => get().world, shiftId),
+      () => {
+        if (liveShift !== shiftId) return
+        const st = get()
+        const queue = createQueue(generator.tickets)
+        queue.assigned = st.queue.assigned
+        set({ world: { ...st.world }, queue, shiftExhausted: generator.exhausted, contentStatus: 'ready', contentError: null })
+      },
+      e => {
+        if (e === STALE || liveShift !== shiftId) return
+        retry = refill
+        set({ contentStatus: 'error', contentError: messageOf(e) })
+      },
+    )
+  }
 
   /** `first` — сценарий, который новая смена ставит первым в пул: так урок открывает свою практику. */
   const fresh = (first?: string) => {
@@ -406,17 +511,23 @@ export function createGameStore(
     */
     const stamp = clock.now().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)
     const shiftId = `SH-${stamp}-${shiftCounter}`
+    liveShift = shiftId
+    retry = null
     generator.tickets = []
-    generator.pool = library.map(s => s.id)
-    if (first) generator.pool = [first, ...generator.pool.filter(id => id !== first)]
+    generator.pool = []
     generator.exhausted = false
     generator.injected = []
-    fillQueue(generator, library.map(metaOf), world, id => scenarioFor(id).inject)
-    return {
+    capsules.clear()
+    const base = {
       world,
-      queue: createQueue(generator.tickets),
+      queue: createQueue([]),
       session: createSession(),
-      scenarios: library,
+      catalog,
+      contentStatus: 'loading' as GameState['contentStatus'],
+      contentError: null as string | null,
+      askTexts: {},
+      grading: false,
+      ticketNotice: null as string | null,
       activeTool: 'queue' as Tool,
       terminalLines: banner(),
       consoles: {},
@@ -435,10 +546,25 @@ export function createGameStore(
       probeResult: null,
       shiftId,
       viewing: null,
-      shiftExhausted: generator.exhausted,
+      shiftExhausted: false,
       progress: emptyProgress(),
       progressLoaded: false,
     }
+    /*
+      Мир этой смены: пока стор не собран — тот, что создан здесь; после —
+      тот, что лежит в сторе (действия кладут туда его копии).
+    */
+    const worldOf = () => {
+      const st = api?.get()
+      return st && st.shiftId === shiftId ? st.world : world
+    }
+    const loaded = loadShift(worldOf, shiftId, first)
+    if (isThenable(loaded)) {
+      pendingShift = loaded.then(applyShift(worldOf, shiftId))
+      return base
+    }
+    pendingShift = null
+    return { ...base, ...(loaded ?? {}) }
   }
 
   /*
@@ -492,6 +618,7 @@ export function createGameStore(
   }
 
   const store = create<GameState>((set, get) => {
+    api = { set, get }
     /**
      * Общая обвязка операций над каталогом.
      *
@@ -626,6 +753,8 @@ export function createGameStore(
         }),
         parked: restParked,
         lastDraft: null,
+        ticketNotice: null,
+        askTexts: {},
         channel: 'call',
         talkingTo: null,
         waitingReply: false,
@@ -729,42 +858,46 @@ export function createGameStore(
       if (!assigned) return
 
       const ticket = findTicket(st.queue, assigned)
-      const scenario = scenarioFor(ticket.scenarioId)
+      const capsule = capsuleOf(ticket.scenarioId)
 
-      // Заявитель судит по своей проблеме: условия задаёт сценарий.
-      const worksNow = allHold(st.world, scenario.fixedWhen)
+      // Заявитель судит по своей проблеме: условия починки знает сервер.
+      return settle(() => content.problemGone(capsule, st.world), worksNow => {
+        const now = get()
+        // Пока сервер отвечал, тикет могли закрыть или начать смену заново.
+        if (now.queue.assigned !== assigned || now.queue.tickets.find(t => t.number === assigned) !== ticket) return
 
-      const [good, bad] = scenario.confirmReplies
-      const reply = worksNow ? good! : bad!
+        const [good, bad] = capsule.confirmReplies
+        const reply = worksNow ? good : bad
 
-      /*
-        Вопрос техника записывается наравне с ответом.
+        /*
+          Вопрос техника записывается наравне с ответом.
 
-        Раньше кнопка писала только реплику заявителя, и в переписке
-        выходило, что человек заговорил сам с собой. С появлением
-        разговора это стало и враньём в разборе: флаг «связались до
-        изменений» поднимается репликой техника, и звонивший кнопкой
-        читал «на связь до начала работы вы не выходили».
-      */
-      const question = 'Проверьте, пожалуйста, всё ли теперь работает.'
+          Раньше кнопка писала только реплику заявителя, и в переписке
+          выходило, что человек заговорил сам с собой. С появлением
+          разговора это стало и враньём в разборе: флаг «связались до
+          изменений» поднимается репликой техника, и звонивший кнопкой
+          читал «на связь до начала работы вы не выходили».
+        */
+        const question = 'Проверьте, пожалуйста, всё ли теперь работает.'
 
-      recordDialogue(st.session, clock, 'call', ticket.requester, 'technician', question)
-      recordDialogue(st.session, clock, 'call', ticket.requester, 'requester', reply)
-      if (worksNow) setFlag(st.session, 'userConfirmed', true)
+        recordDialogue(now.session, clock, 'call', ticket.requester, 'technician', question)
+        recordDialogue(now.session, clock, 'call', ticket.requester, 'requester', reply)
+        if (worksNow) setFlag(now.session, 'userConfirmed', true)
 
-      const at = clock.now().toISOString()
-      ticket.communications.push(
-        {
-          at, channel: 'call', from: 'technician',
-          with: ticket.requester, text: question,
-        },
-        {
-          at, channel: 'call', from: ticket.requester,
-          with: ticket.requester, text: reply,
-        },
-      )
+        const at = clock.now().toISOString()
+        ticket.communications.push(
+          {
+            at, channel: 'call', from: 'technician',
+            with: ticket.requester, text: question,
+          },
+          {
+            at, channel: 'call', from: ticket.requester,
+            with: ticket.requester, text: reply,
+          },
+        )
 
-      set({ session: { ...st.session }, queue: { ...st.queue } })
+        set({ session: { ...now.session }, queue: { ...now.queue }, ticketNotice: null })
+      }, e => set({ ticketNotice: messageOf(e) }))
     },
 
     /**
@@ -777,55 +910,85 @@ export function createGameStore(
      */
     askRequesterTo(askId) {
       const st = get()
-      if (!st.queue.assigned) return
+      const assigned = st.queue.assigned
+      if (!assigned) return
 
-      const ticket = findTicket(st.queue, st.queue.assigned)
-      const scenario = scenarioFor(ticket.scenarioId)
-      const ask = scenario.asks?.find(a => a.id === askId)
+      const ticket = findTicket(st.queue, assigned)
+      const capsule = capsuleOf(ticket.scenarioId)
+      const ask = capsule.asks.find(a => a.id === askId)
       if (!ask) return
 
       // Просьба, не открытая расследованием, недоступна и из кода:
       // интерфейс лишь не показывает её, а правило живёт здесь.
-      if (ask.unlockedBy) {
-        const flags = st.session.flags as unknown as Record<string, unknown>
-        if (flags[ask.unlockedBy] !== true) return
-      }
-
-      applyInject(st.world, ask.effect)
-      if (ask.relogin) relogin(st.world, ask.relogin, clock)
+      const flags = st.session.flags as unknown as Record<string, unknown>
+      if (ask.unlockedBy && flags[ask.unlockedBy] !== true) return
 
       /*
         Заявитель сообщает то, что видит. Просьба могла быть выполнена
         честно и всё равно не помочь — например, войти заново, когда
-        в группу так и не добавили. Условие то же, по которому он
-        подтверждает результат по телефону.
+        в группу так и не добавили. Ответ считает сервер по тому же
+        условию, по которому заявитель подтверждает результат по телефону;
+        эффект просьбы браузер применяет к своему миру сам.
       */
-      const helped = ask.replyIfBroken === undefined
-        || allHold(st.world, scenario.fixedWhen)
-      const reply = helped ? ask.reply : ask.replyIfBroken!
+      return settle(() => content.ask(capsule, askId, st.world, { ...flags }), r => {
+        const now = get()
+        if (!r || now.queue.assigned !== assigned || now.queue.tickets.find(t => t.number === assigned) !== ticket) return
 
-      recordDialogue(st.session, clock, st.channel, ticket.requester, 'technician', ask.ask)
-      recordDialogue(st.session, clock, st.channel, ticket.requester, 'requester', reply)
+        applyInject(now.world, r.effect)
+        if (r.relogin) relogin(now.world, r.relogin, clock)
 
-      if (!st.session.askedFor.includes(askId)) st.session.askedFor.push(askId)
+        recordDialogue(now.session, clock, now.channel, ticket.requester, 'technician', r.ask)
+        recordDialogue(now.session, clock, now.channel, ticket.requester, 'requester', r.reply)
 
-      const at = clock.now().toISOString()
-      ticket.communications.push(
-        {
-          at, channel: st.channel, from: 'technician',
-          with: ticket.requester, text: ask.ask,
-        },
-        {
-          at, channel: st.channel, from: ticket.requester,
-          with: ticket.requester, text: reply,
-        },
-      )
+        if (!now.session.askedFor.includes(askId)) now.session.askedFor.push(askId)
 
-      set({
-        world: { ...st.world },
-        session: { ...st.session },
-        queue: { ...st.queue },
-      })
+        const at = clock.now().toISOString()
+        ticket.communications.push(
+          {
+            at, channel: now.channel, from: 'technician',
+            with: ticket.requester, text: r.ask,
+          },
+          {
+            at, channel: now.channel, from: ticket.requester,
+            with: ticket.requester, text: r.reply,
+          },
+        )
+
+        set({
+          world: { ...now.world },
+          session: { ...now.session },
+          queue: { ...now.queue },
+          ticketNotice: null,
+        })
+      }, e => set({ ticketNotice: messageOf(e) }))
+    },
+
+    loadAskTexts() {
+      const st = get()
+      const assigned = st.queue.assigned
+      if (!assigned) return
+      const ticket = findTicket(st.queue, assigned)
+      const capsule = capsuleOf(ticket.scenarioId)
+      const flags = st.session.flags as unknown as Record<string, unknown>
+      const open = capsule.asks.filter(a => !a.unlockedBy || flags[a.unlockedBy] === true)
+      // Все открытые тексты уже здесь — сервер не спрашиваем.
+      if (open.every(a => a.id in st.askTexts)) return
+      const session = st.session
+
+      return settle(() => content.askTexts(capsule, { ...flags }), texts => {
+        const now = get()
+        // Ответ для прежнего инцидента в новый не попадает.
+        if (now.queue.assigned !== assigned || now.session.flags !== session.flags) return
+        set({ askTexts: { ...now.askTexts, ...texts } })
+      }, e => set({ ticketNotice: messageOf(e) }))
+    },
+
+    retryContent() {
+      const again = retry
+      retry = null
+      if (!again) return
+      set({ contentStatus: 'loading', contentError: null })
+      return again()
     },
 
     setChannel(c) {
@@ -872,12 +1035,8 @@ export function createGameStore(
       if (!withWhom) return
 
       const ticket = findTicket(st.queue, assigned)
-      const scenario = scenarioFor(ticket.scenarioId)
+      const capsule = capsuleOf(ticket.scenarioId)
       const isRequester = withWhom === ticket.requester
-
-      const brief = isRequester
-        ? briefFor(scenario, ticket, st.world, allHold(st.world, scenario.fixedWhen))
-        : contactBrief(st.world, withWhom)
 
       // История именно этого разговора: реплики другим собеседникам
       // в контекст не идут.
@@ -909,6 +1068,25 @@ export function createGameStore(
         dialogueNotice: null,
       })
 
+      /*
+        Заявитель судит по своей проблеме, а условия починки знает сервер
+        (срез 8А): сводка ждёт его ответа. Сбой — реплика без ответа и
+        плашка, как отказ модели, а не падение. Ждётся только настоящий
+        промис: синхронный разъём не сдвигает запрос к модели ни на такт.
+      */
+      let brief
+      try {
+        if (isRequester) {
+          const gone = content.problemGone(capsule, st.world)
+          brief = briefFor(capsule, ticket, st.world, isThenable(gone) ? await gone : gone)
+        } else {
+          brief = contactBrief(st.world, withWhom)
+        }
+      } catch (e) {
+        set({ waitingReply: false, ticketNotice: messageOf(e) })
+        return
+      }
+
       const r = await dialogue.reply({
         channel: st.channel,
         withWhom,
@@ -917,7 +1095,7 @@ export function createGameStore(
         history,
       })
 
-      const after = get()
+      let after = get()
 
       /*
         За время ответа модели могло произойти что угодно: техник сменил
@@ -946,6 +1124,31 @@ export function createGameStore(
         set({ waitingReply: false })
         return
       }
+
+      /*
+        Подтверждение засчитывается по состоянию мира, а не по словам:
+        модель может сказать «спасибо, работает» из вежливости, и
+        принимать это за подтверждение значило бы сделать её оракулом.
+        Заявитель подтверждает только то, что действительно починено,
+        и только про свой инцидент. Мир — после ответа: пока модель
+        думала, техник мог починить; условия починки знает сервер.
+      */
+      let confirmed = false
+      if (isRequester && detectIntent(trimmed) === 'retry') {
+        try {
+          const gone = content.problemGone(capsule, get().world)
+          confirmed = isThenable(gone) ? await gone : gone
+        } catch (e) {
+          set({ ticketNotice: messageOf(e) })
+        }
+        const later = get()
+        if (later.queue.assigned !== assigned || later.talkingTo !== withWhom
+          || later.queue.tickets.find(t => t.number === assigned) !== ticket) {
+          set({ waitingReply: false })
+          return
+        }
+        after = later
+      }
       const replyAt = clock.now().toISOString()
 
       recordDialogue(after.session, clock, after.channel, withWhom, 'requester', r.text)
@@ -954,18 +1157,7 @@ export function createGameStore(
         with: withWhom, text: r.text,
       })
 
-      /*
-        Подтверждение засчитывается по состоянию мира, а не по словам:
-        модель может сказать «спасибо, работает» из вежливости, и
-        принимать это за подтверждение значило бы сделать её оракулом.
-        Заявитель подтверждает только то, что действительно починено,
-        и только про свой инцидент.
-      */
-      if (isRequester
-        && detectIntent(trimmed) === 'retry'
-        && allHold(after.world, scenario.fixedWhen)) {
-        setFlag(after.session, 'userConfirmed', true)
-      }
+      if (confirmed) setFlag(after.session, 'userConfirmed', true)
 
       set({
         session: { ...after.session },
@@ -1341,6 +1533,9 @@ export function createGameStore(
       const ticket = findTicket(st.queue, assigned)
       // Код закрытия обязателен: статус сам по себе тикет не закрывает.
       if (!ticket.resolutionCode) return
+      // Оценка уже на сервере: второе нажатие не уходит и не пишет вторую запись.
+      if (st.grading) return
+      const code = ticket.resolutionCode
 
       /*
         Закрываем до оценки, а не после.
@@ -1348,68 +1543,85 @@ export function createGameStore(
         Оценка смотрит на итоговое состояние: доведён ли тикет до конца —
         одно из шести измерений. Если считать раньше закрытия, статус
         ещё «назначен», и владение недобирает баллы при безупречном
-        прохождении.
+        прохождении. Закрывается копия: оценку считает сервер (срез 8А),
+        и пока она не пришла, настоящий тикет остаётся открытым — сбой
+        связи не должен терять работу.
       */
-      resolve(st.queue, assigned, ticket.resolutionCode)
+      const draft = structuredClone(st.queue)
+      resolve(draft, assigned, code)
+      const closed = findTicket(draft, assigned)
+      const capsule = capsuleOf(ticket.scenarioId)
+      set({ grading: true, ticketNotice: null })
 
-      const scenario = scenarioFor(ticket.scenarioId)
-      const scorecard = gradeIncident({ world: st.world, ticket, session: st.session, scenario })
+      return settle(() => content.grade(capsule, { world: st.world, ticket: closed, session: st.session }), r => {
+        const now = get()
+        // Пока сервер считал, могли начать смену заново: оценка той смены сюда не пишется.
+        if (now.shiftId !== st.shiftId || now.queue.assigned !== assigned
+          || now.queue.tickets.find(t => t.number === assigned) !== ticket) {
+          if (now.shiftId === st.shiftId) set({ grading: false })
+          return
+        }
+        resolve(now.queue, assigned, code)
+        const scorecard = r.scorecard
 
-      /*
-        Вторая линия чинит после передачи — после оценки, чтобы разбор
-        видел мир таким, каким его оставил техник, и до наполнения
-        очереди, чтобы следующий тикет пришёл в починенный мир.
-      */
-      if (ticket.resolutionCode === 'escalate') applyInject(st.world, scenario.onEscalate ?? [])
+        /*
+          Вторая линия чинит после передачи — после оценки, чтобы разбор
+          видел мир таким, каким его оставил техник, и до наполнения
+          очереди, чтобы следующий тикет пришёл в починенный мир.
+        */
+        if (code === 'escalate') applyInject(now.world, r.onEscalate)
 
-      fillQueue(generator, library.map(metaOf), st.world, id => scenarioFor(id).inject)
+        /*
+          Единственная точка записи прохождения: после оценки, после
+          закрытия.
 
-      /*
-        Единственная точка записи прохождения: после оценки, после
-        закрытия.
+          История правится синхронно, а в IndexedDB уезжает следом. Не
+          наоборот: пока идёт `await`, стор отвечает старым `progress`, и
+          второе закрытие, прочитав его, затёрло бы первую запись. Сама
+          запись при этом не блокирует интерфейс, а её отказ ничего не
+          ломает — история уже в памяти, потеряется лишь то, что не
+          переживёт перезагрузку.
+        */
+        const record = recordOf({
+          card: scorecard,
+          ticket,
+          shiftId: now.shiftId,
+          clock,
+        })
+        /*
+          Заметка закрытого тикета становится черновиком статьи — в том же
+          `set`, что и запись прохождения: база знаний — часть прогресса и
+          живёт по его правилу «сначала память, потом хранилище».
+        */
+        const kbDraft = draftFrom(now.progress.kb, record)
+        const progress = {
+          ...now.progress,
+          records: [...now.progress.records, record],
+          kb: kbDraft.kb,
+        }
 
-        История правится синхронно, а в IndexedDB уезжает следом. Не
-        наоборот: пока идёт `await`, стор отвечает старым `progress`, и
-        второе закрытие, прочитав его, затёрло бы первую запись. Сама
-        запись при этом не блокирует интерфейс, а её отказ ничего не
-        ломает — история уже в памяти, потеряется лишь то, что не
-        переживёт перезагрузку.
-      */
-      const record = recordOf({
-        card: scorecard,
-        ticket,
-        shiftId: st.shiftId,
-        clock,
-      })
-      /*
-        Заметка закрытого тикета становится черновиком статьи — в том же
-        `set`, что и запись прохождения: база знаний — часть прогресса и
-        живёт по его правилу «сначала память, потом хранилище».
-      */
-      const draft = draftFrom(st.progress.kb, record)
-      const progress = {
-        ...st.progress,
-        records: [...st.progress.records, record],
-        kb: draft.kb,
-      }
+        // Закрытый тикет покидает окно; новый придёт пополнением с сервера.
+        generator.tickets = generator.tickets.filter(t => t.status !== 'completed')
+        set({
+          world: { ...now.world },
+          queue: createQueue(generator.tickets),
+          scorecard,
+          scoredScenarioId: ticket.scenarioId,
+          activeTool: 'scorecard',
+          progress,
+          lastDraft: kbDraft.id ? { id: kbDraft.id, created: kbDraft.created } : null,
+          // Свой разбор вытесняет чужой: иначе экран покажет прошлое.
+          viewing: null,
+          grading: false,
+          ticketNotice: null,
+        })
 
-      set({
-        // Вошедший тикет мог сломать свою машину — мир изменился.
-        world: { ...st.world },
-        queue: createQueue(generator.tickets),
-        scorecard,
-        scoredScenarioId: ticket.scenarioId,
-        activeTool: 'scorecard',
-        progress,
-        lastDraft: draft.id ? { id: draft.id, created: draft.created } : null,
-        shiftExhausted: generator.exhausted,
-        // Свой разбор вытесняет чужой: иначе экран покажет прошлое.
-        viewing: null,
-      })
+        void saveProgress(progress).catch(() => {
+          // Хранилище недоступно — тренировка продолжается.
+        })
 
-      void saveProgress(progress).catch(() => {
-        // Хранилище недоступно — тренировка продолжается.
-      })
+        return refill()
+      }, e => set({ grading: false, ticketNotice: messageOf(e) }))
     },
 
     hideTicket(number) {
@@ -1420,7 +1632,6 @@ export function createGameStore(
       // Возвращаем в пул — без штрафа, это отложенное дело.
       generator.pool.push(t.scenarioId)
       generator.tickets = q.tickets.filter(x => x.number !== number)
-      fillQueue(generator, library.map(metaOf), st.world, id => scenarioFor(id).inject)
 
       /*
         Скрыли чужой тикет — текущий остаётся на вас.
@@ -1444,6 +1655,8 @@ export function createGameStore(
       }
       if (hidMine) set({ ...next, activeTool: 'queue' })
       else set(next)
+      // Окно пополнится с сервера: капсула входящего тикета ещё не у нас.
+      void refill()
     },
 
     viewRecord(r: TicketRecord) {
@@ -1506,7 +1719,7 @@ export function createGameStore(
 
     practice(scenarioId, newShift = false) {
       const st = get()
-      if (!library.some(sc => sc.id === scenarioId)) return { status: 'blocked', error: 'сценарий не найден' }
+      if (!st.catalog?.scenarios.some(sc => sc.id === scenarioId)) return { status: 'blocked', error: 'сценарий не найден' }
 
       const inWindow = st.queue.tickets.find(t => t.scenarioId === scenarioId && t.status !== 'completed')
       if (inWindow && st.queue.assigned === inWindow.number) {
@@ -1532,10 +1745,13 @@ export function createGameStore(
       }
       const { progress, progressLoaded } = st
       set({ ...fresh(scenarioId), progress, progressLoaded })
-      const ticket = get().queue.tickets.find(t => t.scenarioId === scenarioId)
-      if (!ticket) return { status: 'blocked', error: 'тикет не вошёл в новую смену' }
-      get().claimTicket(ticket.number)
-      return { status: 'opened' }
+      // Новая смена грузится с сервера: свой тикет берётся, когда она пришла.
+      return chain(pendingShift ?? undefined, (): PracticeResult => {
+        const ticket = get().queue.tickets.find(t => t.scenarioId === scenarioId)
+        if (!ticket) return { status: 'blocked', error: get().contentError ?? 'тикет не вошёл в новую смену' }
+        get().claimTicket(ticket.number)
+        return { status: 'opened' }
+      })
     },
 
     startInterview(trackId) {

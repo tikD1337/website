@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createGameStore } from './useGame'
+import { testContent } from '../content/server/test-content'
 import { defaultConfig } from '../core/dialogue/types'
 import type { FetchLike } from '../core/dialogue/openai'
 
@@ -7,7 +8,7 @@ const clock = { now: () => new Date('2026-09-10T09:00:00.000Z') }
 
 /** Стор с взятым тикетом о блокировке; с fetch — модель включена. */
 const store = (fetch?: FetchLike) => {
-  const g = createGameStore(clock, fetch ? { fetch } : undefined)
+  const g = createGameStore(clock, fetch ? { fetch } : undefined, undefined, testContent())
   const s = () => g.getState()
   const lockout = s().queue.tickets.find(t => t.scenarioId === 'identity-account-lockout')!
   s().claimTicket(lockout.number)
@@ -42,7 +43,7 @@ const fix = (s: ReturnType<typeof store>) => {
 
 describe('реплика', () => {
   it('без тикета, без собеседника и пустая — не уходит', async () => {
-    const g = createGameStore(clock)
+    const g = createGameStore(clock, undefined, undefined, testContent())
     g.getState().callTo('e.varga')
     await g.getState().say('Здравствуйте')
     expect(g.getState().session.dialogue).toHaveLength(0)

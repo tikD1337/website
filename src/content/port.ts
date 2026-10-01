@@ -33,7 +33,7 @@ export class ContentError extends Error {
   }
 }
 
-const isThenable = <T>(x: MaybePromise<T>): x is Promise<T> =>
+export const isThenable = <T>(x: MaybePromise<T>): x is Promise<T> =>
   typeof (x as { then?: unknown } | null)?.then === 'function'
 
 /**
@@ -44,8 +44,8 @@ const isThenable = <T>(x: MaybePromise<T>): x is Promise<T> =>
  */
 export function settle<T, R>(
   run: () => MaybePromise<T>,
-  ok: (v: T) => R,
-  fail: (e: unknown) => R,
+  ok: (v: T) => MaybePromise<R>,
+  fail: (e: unknown) => MaybePromise<R>,
 ): MaybePromise<R> {
   let x: MaybePromise<T>
   try {
@@ -54,6 +54,11 @@ export function settle<T, R>(
     return fail(e)
   }
   return isThenable(x) ? x.then(ok, fail) : ok(x)
+}
+
+/** Следующий шаг после значения или промиса; исключение и отказ идут дальше как есть. */
+export function chain<T, R>(x: MaybePromise<T>, fn: (v: T) => MaybePromise<R>): MaybePromise<R> {
+  return isThenable(x) ? x.then(fn) : fn(x)
 }
 
 /** Все значения разом: хоть одно промисом — промис. */

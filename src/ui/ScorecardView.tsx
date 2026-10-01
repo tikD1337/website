@@ -1,6 +1,5 @@
 import { useGame } from '../store/useGame'
 import { withPlural } from './plural'
-import { scenarioFor } from '../scenarios'
 import { VERDICT, mark } from './verdict'
 import { formatDateTime } from './dates'
 import type { Scorecard } from '../core/grading/grade'
@@ -74,7 +73,6 @@ function CardBody({ card }: { card: Scorecard }) {
 
 export function ScorecardView() {
   const card = useGame(s => s.scorecard)
-  const scoredId = useGame(s => s.scoredScenarioId)
   const viewing = useGame(s => s.viewing)
   const closeViewing = useGame(s => s.closeViewing)
   const setTool = useGame(s => s.setTool)
@@ -85,7 +83,6 @@ export function ScorecardView() {
   // Разбор из истории подменяет свежий: это то же самое прохождение,
   // открытое задним числом, а не второй экран.
   const shown = viewing ? viewing.card : card
-  const scenarioId = viewing ? viewing.scenarioId : scoredId
 
   if (!shown) {
     return (
@@ -137,10 +134,16 @@ export function ScorecardView() {
         </div>
       )}
 
-      <div className="section">
-        <h2>Что это было на самом деле</h2>
-        <p className="prose">{scenarioId ? scenarioFor(scenarioId).rootCause : ''}</p>
-      </div>
+      {/*
+        Причина приходит с оценкой сервера и хранится в карточке (срез 8А).
+        Запись прошлого формата её не несёт — раздела тогда нет.
+      */}
+      {shown.rootCause && (
+        <div className="section">
+          <h2>Что это было на самом деле</h2>
+          <p className="prose">{shown.rootCause}</p>
+        </div>
+      )}
 
       <div className="bar">
         {viewing ? (

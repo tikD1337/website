@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createGameStore } from '../../store/useGame'
+import { testContent } from '../../content/server/test-content'
 import { ouRows, objectsIn } from './DirectoryConsole'
 import { createWorld } from '../../core/world/world'
 import { findUser } from '../../core/directory/accounts'
@@ -8,7 +9,7 @@ const clock = { now: () => new Date('2026-09-10T11:00:00.000Z') }
 
 /** Стор с взятым тикетом APIPA: заявитель — p.raman, руководитель — Elena Varga. */
 const store = (claim = true) => {
-  const g = createGameStore(clock)
+  const g = createGameStore(clock, undefined, undefined, testContent())
   const s = () => g.getState()
   if (claim) s().claimTicket(s().queue.tickets[0]!.number)
   return s

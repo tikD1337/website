@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createGameStore } from './useGame'
+import { testContent } from '../content/server/test-content'
 import { findUser } from '../core/directory/accounts'
 import { SCENARIOS } from '../scenarios'
 
@@ -7,7 +8,7 @@ const clock = { now: () => new Date('2026-09-10T11:00:00.000Z') }
 
 /** Окно на всю библиотеку: нужны тикеты и блокировки, и папки. */
 const store = (scenarioId?: string) => {
-  const g = createGameStore(clock, undefined, SCENARIOS.length)
+  const g = createGameStore(clock, undefined, SCENARIOS.length, testContent())
   const s = () => g.getState()
   if (scenarioId) s().claimTicket(s().queue.tickets.find(t => t.scenarioId === scenarioId)!.number)
   return s
@@ -54,6 +55,33 @@ describe('просьба к заявителю', () => {
     видимая с первой секунды, обесценивала всю развилку. Правило живёт в
     сторе, а не в интерфейсе: спрятанная кнопка защищает только от мыши.
   */
+  /*
+    Текст просьбы — диагноз, и с переездом контента на сервер (срез 8А)
+    браузер получает его только для открытых просьб: до расследования
+    его нет ни на кнопке, ни в памяти стора.
+  */
+  it('тексты просьб приходят, когда расследование их открыло', () => {
+    const s = store('identity-account-lockout')
+    s().loadAskTexts()
+    expect(s().askTexts).toEqual({})
+
+    s().openApp('eventvwr')
+    s().loadAskTexts()
+    expect(Object.keys(s().askTexts)).toEqual(['clear-phone'])
+
+    /*
+      Найдено при переносе на сервер: тексты лежали по сценарию, и тикет,
+      скрытый и взятый снова, — новый инцидент со сброшенными флагами —
+      показывал бы диагноз на кнопке до расследования.
+    */
+    // Скрытый тикет возвращается, когда его машину освобождает док, вставший на её место.
+    s().hideTicket(s().queue.assigned!)
+    s().hideTicket(s().queue.tickets.find(t => t.scenarioId === 'hw-dock-failed')!.number)
+    s().claimTicket(s().queue.tickets.find(t => t.scenarioId === 'identity-account-lockout')!.number)
+    s().loadAskTexts()
+    expect(s().askTexts).toEqual({})
+  })
+
   it('закрыта, пока причина не выяснена расследованием', () => {
     const s = store('identity-account-lockout')
     s().askRequesterTo('clear-phone')

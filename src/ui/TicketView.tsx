@@ -41,7 +41,10 @@ export function TicketView() {
   const informRequester = useGame(s => s.informRequester)
   const askRequesterTo = useGame(s => s.askRequesterTo)
   const callTo = useGame(s => s.callTo)
-  const scenarios = useGame(s => s.scenarios)
+  const askTexts = useGame(s => s.askTexts)
+  const loadAskTexts = useGame(s => s.loadAskTexts)
+  const grading = useGame(s => s.grading)
+  const ticketNotice = useGame(s => s.ticketNotice)
   const setTicketStatus = useGame(s => s.setTicketStatus)
   const setTool = useGame(s => s.setTool)
   const waitForShipment = useGame(s => s.waitForShipment)
@@ -59,6 +62,14 @@ export function TicketView() {
     setDraft(ticket?.resolutionNotes ?? '')
     setWaitError(null)
   }, [ticket?.number])
+
+  /*
+    Тексты открытых просьб приходят с сервера (срез 8А): расследование
+    поднимает флаг — стор спрашивает текст. Уже полученные не просятся.
+  */
+  useEffect(() => {
+    void loadAskTexts()
+  }, [ticket?.number, session.flags, loadAskTexts])
 
   if (!ticket) {
     return (
@@ -78,9 +89,7 @@ export function TicketView() {
     расследованием: текст просьбы — это диагноз, и до выяснения
     причины его на экране быть не должно.
   */
-  const flags = session.flags as unknown as Record<string, unknown>
-  const asks = (scenarios.find(sc => sc.id === ticket.scenarioId)?.asks ?? [])
-    .filter(a => !a.unlockedBy || flags[a.unlockedBy] === true)
+  const asks = Object.entries(askTexts).map(([id, ask]) => ({ id, ask }))
 
   return (
     <>
@@ -372,12 +381,13 @@ export function TicketView() {
         <button
           className="act primary"
           type="button"
-          disabled={!canResolve}
-          onClick={() => { saveNotes(draft); resolveTicket() }}
+          disabled={!canResolve || grading}
+          onClick={() => { saveNotes(draft); void resolveTicket() }}
         >
-          Закрыть тикет
+          {grading ? 'Оценка…' : 'Закрыть тикет'}
         </button>
       </div>
+      {ticketNotice && <p className="sub degraded">{ticketNotice}</p>}
 
       <p className="sub">
         Рабочий статус сам по себе тикет не закрывает — нужен код закрытия.

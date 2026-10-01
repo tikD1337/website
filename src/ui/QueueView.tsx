@@ -8,6 +8,9 @@ export function QueueView() {
   const exhausted = useGame(s => s.shiftExhausted)
   const records = useGame(s => s.progress.records)
   const shiftId = useGame(s => s.shiftId)
+  const status = useGame(s => s.contentStatus)
+  const contentError = useGame(s => s.contentError)
+  const retryContent = useGame(s => s.retryContent)
 
   const open = queue.tickets.filter(t => t.status !== 'completed')
   /*
@@ -36,6 +39,21 @@ export function QueueView() {
         Молчаливо опустевшая таблица читается как поломка тренажёра, а
         не как конец смены.
       */}
+      {/*
+        Смена и пополнение приходят с сервера (срез 8А). Сбой называется
+        словами и чинится кнопкой: молча пустая очередь читалась бы как
+        поломка тренажёра.
+      */}
+      {status === 'loading' && <p className="sub">Загрузка смены…</p>}
+      {status === 'error' && (
+        <div className="section">
+          <p className="sub degraded">{contentError}</p>
+          <div className="bar">
+            <button className="act primary" type="button" onClick={() => void retryContent()}>Повторить</button>
+          </div>
+        </div>
+      )}
+
       {exhausted && (
         <div className="section">
           <h2>Смена окончена</h2>

@@ -130,7 +130,7 @@ function CheckItem({ check, path, done, onAnswer }: {
 
 /** Урок открывает свой тикет по правилам очереди; новая смена — только с подтверждением. */
 function Practice({ scenarioId }: { scenarioId: string }) {
-  const scenario = useGame(s => s.scenarios.find(x => x.id === scenarioId))
+  const scenario = useGame(s => s.catalog?.scenarios.find(x => x.id === scenarioId))
   const records = useGame(s => s.progress.records)
   const practice = useGame(s => s.practice)
   const [result, setResult] = useState<PracticeResult | null>(null)
@@ -159,14 +159,14 @@ function Practice({ scenarioId }: { scenarioId: string }) {
           {/* Безопасное действие — на месте нажатой кнопки и с фокусом: двойной клик по инерции не начнёт смену. */}
           <div className="bar">
             <button className="act" type="button" autoFocus onClick={() => setResult(null)}>Отмена</button>
-            <button className="act primary" type="button" onClick={() => setResult(practice(scenarioId, true))}>
+            <button className="act primary" type="button" onClick={async () => setResult(await practice(scenarioId, true))}>
               Начать новую смену
             </button>
           </div>
         </>
       ) : (
         <div className="bar">
-          <button className="act primary" type="button" onClick={() => setResult(practice(scenarioId))}>
+          <button className="act primary" type="button" onClick={async () => setResult(await practice(scenarioId))}>
             Взять тикет
           </button>
         </div>

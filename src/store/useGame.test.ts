@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createGameStore } from './useGame'
+import { testContent } from '../content/server/test-content'
+import { deferred } from '../content/testing'
+import { ContentError, EXPIRED, UNAVAILABLE } from '../content/port'
 import { saveProgress } from '../core/progress/db'
 import { validateProgress } from '../core/progress/validate'
 
@@ -22,7 +25,7 @@ const clockAt = (iso: string) => ({ now: () => new Date(iso) })
 
 beforeEach(() => {
   // Стор собирает смену сам — интерфейс start() не вызывает, тесты тоже.
-  g = createGameStore(clockAt('2026-09-09T18:00:00.000Z'))
+  g = createGameStore(clockAt('2026-09-09T18:00:00.000Z'), undefined, undefined, testContent())
 })
 
 const firstNumber = () => s().queue.tickets[0]!.number
@@ -55,7 +58,7 @@ describe('смена', () => {
     держалось только в очереди.
   */
   it('машина сценария из пула исправна, пока его тикет не вошёл в окно', () => {
-    g = createGameStore(clockAt('2026-09-09T18:00:00.000Z'), undefined, 1)
+    g = createGameStore(clockAt('2026-09-09T18:00:00.000Z'), undefined, 1, testContent())
     const spooler = () => s().world.devices['AL-DSK-0192']!.services
       .find(x => x.name === 'Spooler')!
     expect(s().queue.tickets.map(t => t.scenarioId)).toEqual(['net-apipa-no-lease'])
@@ -94,7 +97,7 @@ describe('смена', () => {
     сценария сталкивалось бы с первым по идентификатору записи.
   */
   it('смены различаются и между запусками, и внутри запуска', () => {
-    const other = createGameStore(clockAt('2026-09-10T08:00:00.000Z'))
+    const other = createGameStore(clockAt('2026-09-10T08:00:00.000Z'), undefined, undefined, testContent())
     expect(other.getState().shiftId).not.toBe(s().shiftId)
 
     const first = s().shiftId
@@ -380,7 +383,7 @@ describe('серверная', () => {
       }],
       expectedResolution: 'escalate',
     }
-    g = createGameStore(clockAt('2026-09-09T18:00:00.000Z'), undefined, 1, [relay, apipaNoLease])
+    g = createGameStore(clockAt('2026-09-09T18:00:00.000Z'), undefined, 1, testContent({ scenarios: [relay, apipaNoLease] }))
     const helpers = () => s().world.network.switches[1]!.vlanInterfaces.find(v => v.vlan === 20)!.helpers
     expect(helpers()).toEqual([])
 
@@ -420,7 +423,7 @@ describe('логистика', () => {
 
   beforeEach(() => {
     t = Date.parse(T0)
-    g = createGameStore(clock, undefined, 2, [dock, apipaNoLease])
+    g = createGameStore(clock, undefined, 2, testContent({ scenarios: [dock, apipaNoLease] }))
   })
 
   /*
@@ -473,7 +476,7 @@ describe('логистика', () => {
     expect(s().session.flags.userConfirmed).toBe(true)
 
     // Закрыт до доставки: доставка доезжает, но тикет не оживает и ничего не падает.
-    g = createGameStore(clock, undefined, 2, [dock, apipaNoLease])
+    g = createGameStore(clock, undefined, 2, testContent({ scenarios: [dock, apipaNoLease] }))
     const number = ticketOf('dock').number
     s().claimTicket(number)
     swap()
@@ -613,7 +616,7 @@ describe('курсы', () => {
 
   it('сценария нет в окне: новая смена только с подтверждением, отложенный тикет назван', () => {
     const dock = SCENARIOS.find(x => x.id === 'hw-dock-failed')!
-    g = createGameStore(clockAt('2026-09-28T09:00:00.000Z'), undefined, 1, [dock, apipaNoLease])
+    g = createGameStore(clockAt('2026-09-28T09:00:00.000Z'), undefined, 1, testContent({ scenarios: [dock, apipaNoLease] }))
     const dockNumber = firstNumber()
     s().claimTicket(dockNumber)
     s().createShipment({ type: 'dock-monitor-swap', assetTag: 'AL-P2040' })
@@ -642,7 +645,7 @@ describe('интервью', () => {
     return { fetch, release: (text: string) => release(text) }
   }
   const withModel = (fetch: ReturnType<typeof heldModel>['fetch']) => {
-    g = createGameStore(clockAt('2026-09-30T10:00:00.000Z'), { fetch })
+    g = createGameStore(clockAt('2026-09-30T10:00:00.000Z'), { fetch }, undefined, testContent())
     s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
   }
   const candidateLines = () => s().interview!.transcript.filter(l => l.speaker === 'candidate').map(l => l.text)
@@ -716,5 +719,106 @@ describe('интервью', () => {
     const saved = vi.mocked(saveProgress).mock.calls.at(-1)![0]
     expect(saved.interviews).toEqual([record])
     expect(validateProgress(saved)).toEqual([])
+  })
+})
+
+/**
+ * Смена и тикет через сервер (срез 8А).
+ *
+ * Здесь разъём отвечает, когда скажет тест: так видны загрузка, сбой
+ * связи и ответ, пришедший в изменившийся мир. Остальные тесты идут на
+ * синхронном разъёме и сети не замечают.
+ */
+describe('смена и тикет через сервер', () => {
+  const clock = clockAt('2026-10-01T10:00:00.000Z')
+
+  it('смена с сервера: загрузка, затем три тикета', async () => {
+    const d = deferred(testContent())
+    g = createGameStore(clock, undefined, 3, d.port)
+    expect(s().contentStatus).toBe('loading')
+    expect(s().queue.tickets).toEqual([])
+    await d.flush()
+    expect(s().contentStatus).toBe('ready')
+    expect(s().queue.tickets).toHaveLength(3)
+  })
+
+  it('сбой сервера при старте — плашка и повтор', async () => {
+    const d = deferred(testContent())
+    g = createGameStore(clock, undefined, 3, d.port)
+    await d.fail(new ContentError('unavailable', UNAVAILABLE))
+    expect(s()).toMatchObject({ contentStatus: 'error', contentError: UNAVAILABLE })
+    expect(s().queue.tickets).toEqual([])
+
+    const again = s().retryContent()
+    await d.flush()
+    await again
+    expect(s()).toMatchObject({ contentStatus: 'ready', contentError: null })
+    expect(s().queue.tickets).toHaveLength(3)
+  })
+
+  it('«Пройти заново» во время загрузки: поздний ответ старой смены не затирает новую', async () => {
+    const d = deferred(testContent())
+    g = createGameStore(clock, undefined, 3, d.port)
+    const first = s().shiftId
+    s().reset()
+    await d.flush()
+    expect(s().shiftId).not.toBe(first)
+    // одна смена, а не шесть тикетов и не мир, сломанный дважды
+    expect(s().queue.tickets).toHaveLength(3)
+    expect(new Set(s().queue.tickets.map(t => t.scenarioId)).size).toBe(3)
+  })
+
+  /** Тикет APIPA взят и готов к закрытию. */
+  const ready = async () => {
+    const d = deferred(testContent({ scenarios: [apipaNoLease] }))
+    g = createGameStore(clock, undefined, 1, d.port)
+    await d.flush()
+    s().claimTicket(firstNumber())
+    s().setResolutionCode('solved')
+    return { d, number: firstNumber() }
+  }
+
+  /*
+    Закрытие — не повод терять работу: связь пропала или сервер
+    перезапущен с другим секретом — тикет открыт, техник видит, что
+    делать, повторное нажатие после восстановления закрывает.
+  */
+  it('сбой оценки оставляет тикет открытым, повторное закрытие проходит', async () => {
+    const failures: Array<[string, ContentError]> = [
+      ['связь', new ContentError('unavailable', UNAVAILABLE)],
+      ['подпись', new ContentError('expired', EXPIRED)],
+    ]
+    let last = null as Awaited<ReturnType<typeof ready>>['d'] | null
+    for (const [name, failure] of failures) {
+      const { d, number } = await ready()
+      last = d
+      const p = s().resolveTicket()
+      expect(s().grading, name).toBe(true)
+      s().resolveTicket()
+      expect(d.pending(), `${name}: второе нажатие во время оценки не уходит`).toBe(1)
+      await d.fail(failure)
+      await p
+      expect(s(), name).toMatchObject({ grading: false, ticketNotice: failure.message })
+      expect(s().progress.records, name).toHaveLength(0)
+      expect(s().queue.assigned, name).toBe(number)
+    }
+
+    const again = s().resolveTicket()
+    await last!.flush()
+    await again
+    expect(s().progress.records).toHaveLength(1)
+    expect(s().scorecard!.rootCause).toBe(apipaNoLease.rootCause)
+    expect(s().ticketNotice).toBeNull()
+  })
+
+  it('оценка, пришедшая после «Пройти заново», отбрасывается', async () => {
+    const { d } = await ready()
+    const p = s().resolveTicket()
+    s().reset()
+    await d.flush()
+    await p
+    expect(s().progress.records).toHaveLength(0)
+    expect(s().scorecard).toBeNull()
+    expect(s().grading).toBe(false)
   })
 })

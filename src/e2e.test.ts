@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createGameStore } from './store/useGame'
+import { testContent } from './content/server/test-content'
 import { hasShareAccess } from './core/directory/accounts'
 import { defaultConfig } from './core/dialogue/types'
 import { SCENARIOS } from './scenarios'
@@ -28,7 +29,7 @@ const play = (scenarioId: string, iso: string, fetch?: FetchLike) => {
   elapsed = 0
   const library = [...SCENARIOS].sort((a, b) => Number(b.id === scenarioId) - Number(a.id === scenarioId))
   const g = createGameStore({ now: () => new Date(Date.parse(iso) + elapsed) }, fetch ? { fetch } : undefined,
-    SCENARIOS.length, library)
+    SCENARIOS.length, testContent({ scenarios: library }))
   const s = () => g.getState()
   s().claimTicket(s().queue.tickets.find(t => t.scenarioId === scenarioId)!.number)
   if (fetch) s().setDialogueConfig({ ...defaultConfig(), mode: 'local' })
@@ -675,7 +676,7 @@ describe('база знаний', () => {
 
 describe('курсы', () => {
   it('секция проходится целиком и открывает следующую; урок ведёт на свой тикет', () => {
-    const g = createGameStore({ now: () => new Date('2026-09-30T10:00:00.000Z') })
+    const g = createGameStore({ now: () => new Date('2026-09-30T10:00:00.000Z') }, undefined, undefined, testContent())
     const s = () => g.getState()
     const right = (c: Check): Answer => (c.kind === 'choice' ? c.options.findIndex(o => o.correct) : c.accept[0]!)
     const process = firstLine.sections[0]!
