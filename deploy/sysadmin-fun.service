@@ -1,0 +1,24 @@
+# Сервер контента sysadmin.fun (срез 8А).
+# Установка: sudo cp deploy/sysadmin-fun.service /etc/systemd/system/
+#            sudo systemctl daemon-reload && sudo systemctl enable --now sysadmin-fun
+[Unit]
+Description=sysadmin.fun — сервер контента тренажёра
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/node /opt/sysadmin-fun/sysadmin-fun.mjs
+Environment=HOST=127.0.0.1
+Environment=PORT=8787
+Environment=DATA_DIR=/var/lib/sysadmin-fun
+# Секрет подписи живёт в /var/lib/sysadmin-fun/secret и переживает перезапуск.
+StateDirectory=sysadmin-fun
+DynamicUser=yes
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

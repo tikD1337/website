@@ -4,7 +4,7 @@ import { createLimiter, type LimitKind } from './limits'
 /** Тело больше мегабайта не читается: мир весит десятки килобайт. */
 export const MAX_BODY = 1_048_576
 
-const ERRORS = {
+export const ERRORS = {
   bad: 'Неверный запрос.',
   expired: 'Подпись тикета не принята.',
   notFound: 'Нет такого адреса.',

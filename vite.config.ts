@@ -3,6 +3,7 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import type { Plugin } from 'vite'
 import { llmProxy } from './vite.llm-proxy'
+import { contentApi } from './vite.content'
 
 const NOTICE = '/*! © 2026 sysadmin.fun (github.com/tikD1337). Все права защищены. Копирование и распространение без письменного разрешения запрещены. */\n'
 
@@ -31,7 +32,7 @@ export default defineConfig({
     config/llm.local.json — файла вне репозитория — и подставляется
     заголовком. В собранную страницу он не попадает.
   */
-  plugins: [react(), llmProxy(), copyrightNotice()],
+  plugins: [react(), llmProxy(), contentApi(), copyrightNotice()],
   server: {
     port: 5173,
   },

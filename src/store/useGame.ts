@@ -26,9 +26,7 @@ import {
   settle, chain, all, isThenable, messageOf,
   type Capsule, type Catalog, type ContentPort, type LessonContent, type MaybePromise, type QuizContent, type TrackMeta,
 } from '../content/port'
-// Временно, до сетевого разъёма (задача 9): контент ещё едет в бандле.
-import { createContentService } from '../content/server/service'
-import { LIBRARY } from '../content/server/library'
+import { remoteContent } from '../content/remote'
 import { createSession, setFlag, recordDialogue } from '../core/session/session'
 import { createRegistry } from '../core/terminal/registry'
 import { ipconfig } from '../core/terminal/commands/ipconfig'
@@ -365,8 +363,11 @@ export function createGameStore(
   dialogueDeps?: { fetch?: Parameters<typeof createDialogue>[0]['fetch'] },
   shiftWindow = SHIFT_WINDOW,
   /** библиотека сценариев; подменяется в тестах, которым нужен свой сценарий */
-  /** разъём контента: сервис в тестах, сеть в приложении (задача 9) */
-  content: ContentPort = createContentService({ ...LIBRARY, sign: s => s, now: () => Date.now() }),
+  /**
+   * Разъём контента: в приложении — сервер (`/api`), в тестах — сервис.
+   * Контента в бандле нет (срез 8А): это проверяет `src/bundle.test.ts`.
+   */
+  content: ContentPort = remoteContent(),
 ): UseBoundStore<StoreApi<GameState>> {
   const registry = createRegistry()
   registry.register('ipconfig', ipconfig)

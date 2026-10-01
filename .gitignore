@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# сборка сервера контента — выкладывается на Pi, не коммитится
+server-dist/
 dist-ssr/
 *.local
 
