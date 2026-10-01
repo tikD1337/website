@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
-  createQueueGenerator, fillQueue, SHIFT_WINDOW,
+  createQueueGenerator, fillQueue, planFill, SHIFT_WINDOW,
   type QueueGeneratorState,
 } from './generate'
-import type { Scenario } from '../scenario/types'
+import { metaOf, type Scenario } from '../scenario/types'
 import { createWorld } from '../world/world'
 import type { WorldState } from '../world/types'
 
@@ -26,9 +26,13 @@ const C = { ...A, id: 'c', summary: 'C', requester: 'u3', device: 'M-3' }
 const C2 = { ...A, id: 'c2', summary: 'C2', requester: 'u4', device: 'M-3' }
 const SCENARIOS = [A, B, C, C2]
 
+/** Генератор видит карточки, поломку отдаёт капсула — здесь её роль играет сам сценарий. */
+const fill = (g: QueueGeneratorState, list: Scenario[], w: WorldState) =>
+  fillQueue(g, list.map(metaOf), w, id => list.find(s => s.id === id)!.inject)
+
 function gen(): QueueGeneratorState {
   const g = createQueueGenerator(SCENARIOS.map(s => s.id))
-  fillQueue(g, SCENARIOS, world)
+  fill(g, SCENARIOS, world)
   return g
 }
 const ids = (g: QueueGeneratorState) => g.tickets.map(t => t.scenarioId)
@@ -46,14 +50,14 @@ describe('окно смены', () => {
     // Закрыт тикет на свободной машине M-1: C2 ждёт занятую M-3 и не входит.
     const freeSlot = gen()
     freeSlot.tickets.find(t => t.device === 'M-1')!.status = 'completed'
-    fillQueue(freeSlot, SCENARIOS, world)
+    fill(freeSlot, SCENARIOS, world)
     expect(ids(freeSlot).sort()).toEqual(['b', 'c'])
     expect(freeSlot.pool).toEqual(['c2'])
 
     // Закрыт тикет на M-3: C2 входит.
     const waited = gen()
     waited.tickets.find(t => t.device === 'M-3')!.status = 'completed'
-    fillQueue(waited, SCENARIOS, world)
+    fill(waited, SCENARIOS, world)
     expect(ids(waited)).toEqual(['a', 'b', 'c2'])
     expect(waited.pool).toEqual([])
   })
@@ -62,7 +66,7 @@ describe('окно смены', () => {
     const g = gen()
     const gone = g.tickets.splice(0, 1)[0]!
     g.pool.push(gone.scenarioId)
-    fillQueue(g, SCENARIOS, world)
+    fill(g, SCENARIOS, world)
     expect(g.tickets).toHaveLength(SHIFT_WINDOW)
     expect(ids(g)).toContain(gone.scenarioId)
   })
@@ -74,13 +78,13 @@ describe('окно смены', () => {
   */
   it('исчерпание объявляется, только когда пуст и пул, и окно', () => {
     const waiting = createQueueGenerator(['c', 'c2'])
-    fillQueue(waiting, SCENARIOS, world)
+    fill(waiting, SCENARIOS, world)
     expect(waiting.exhausted).toBe(false)
 
     const g = gen()
     while (g.pool.length > 0 || g.tickets.some(t => t.status !== 'completed')) {
       for (const t of g.tickets) t.status = 'completed'
-      fillQueue(g, SCENARIOS, world)
+      fill(g, SCENARIOS, world)
     }
     expect(g.tickets).toEqual([])
     expect(g.exhausted).toBe(true)
@@ -94,9 +98,26 @@ describe('окно смены', () => {
  * машине въезжали вместе, после чего ломали друг друга.
  */
 describe('одна открытая поломка на машину', () => {
+  /*
+    Стор узнаёт, какие тикеты войдут в окно, до того как получит их
+    капсулы с сервера: план и наполнение обязаны выбрать одно и то же.
+  */
+  it('planFill называет ровно то, что fillQueue внесёт, и не трогает генератор', () => {
+    const g = createQueueGenerator(['c', 'c2', 'a'], 2)
+    const before = structuredClone(g)
+    expect(planFill(g, SCENARIOS.map(metaOf))).toEqual(['c', 'a'])
+    expect(g).toEqual(before)
+
+    const injected: string[] = []
+    fillQueue(g, SCENARIOS.map(metaOf), createWorld(), id => { injected.push(id); return [] })
+    expect(ids(g)).toEqual(['c', 'a'])
+    expect(injected).toEqual(['c', 'a'])
+    expect(g.pool).toEqual(['c2'])
+  })
+
   it('в пустое окно не въедут два сценария одной машины; свободная машина не ждёт занятую', () => {
     const g = createQueueGenerator(['c', 'c2', 'b'])
-    fillQueue(g, SCENARIOS, world)
+    fill(g, SCENARIOS, world)
     expect(ids(g).sort()).toEqual(['b', 'c'])
     expect(g.pool).toEqual(['c2'])
   })
@@ -111,12 +132,12 @@ describe('одна открытая поломка на машину', () => {
     const N2 = { ...A, id: 'n2', device: 'M-6', resources: ['dhcp:vlan20'] }
     const list = [N1, N2, B]
     const g = createQueueGenerator(list.map(s => s.id))
-    fillQueue(g, list, world)
+    fill(g, list, world)
     expect(ids(g)).toEqual(['n1', 'b'])
     expect(g.pool).toEqual(['n2'])
 
     g.tickets[0]!.status = 'completed'
-    fillQueue(g, list, world)
+    fill(g, list, world)
     expect(ids(g)).toEqual(['b', 'n2'])
   })
 
@@ -137,22 +158,22 @@ describe('одна открытая поломка на машину', () => {
     const g = createQueueGenerator(['link', 'disk'])
     const machine = () => w.devices[HOST]!
 
-    fillQueue(g, BOTH, w)
+    fill(g, BOTH, w)
     expect([machine().adapters[0]!.linkUp, machine().disks[0]!.health]).toEqual([false, 'healthy'])
 
     g.tickets[0]!.status = 'completed'
-    fillQueue(g, BOTH, w)
+    fill(g, BOTH, w)
     expect(ids(g)).toEqual(['disk'])
     expect(machine().disks[0]!.health).toBe('failing')
 
     // Техник начал чинить и отложил тикет — вернувшись, тот не ломает машину заново.
     const w2 = createWorld()
     const g2 = createQueueGenerator(['link'])
-    fillQueue(g2, BOTH, w2)
+    fill(g2, BOTH, w2)
     w2.devices[HOST]!.adapters[0]!.linkUp = true
     g2.tickets = []
     g2.pool.push('link')
-    fillQueue(g2, BOTH, w2)
+    fill(g2, BOTH, w2)
     expect(ids(g2)).toEqual(['link'])
     expect(w2.devices[HOST]!.adapters[0]!.linkUp).toBe(true)
   })

@@ -45,6 +45,14 @@ export interface Scorecard {
   objectives: ObjectiveResult[]
   /** поломки, которые игрок создал сам и о которых не знает */
   silentFaults: string[]
+  /**
+   * Корневая причина — для разбора после закрытия.
+   *
+   * Хранится в карточке, а не берётся из библиотеки: с переездом
+   * контента на сервер (срез 8А) у браузера библиотеки нет. Записи
+   * прошлого формата причины не несут.
+   */
+  rootCause?: string
 }
 
 export interface GradeArgs {
@@ -314,5 +322,5 @@ export function gradeIncident(args: GradeArgs): Scorecard {
           ? 'partial'
           : 'fail'
 
-  return { verdict, points, dimensions, note, objectives, silentFaults }
+  return { verdict, points, dimensions, note, objectives, silentFaults, rootCause: scenario.rootCause }
 }

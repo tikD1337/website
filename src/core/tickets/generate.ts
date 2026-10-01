@@ -1,7 +1,7 @@
 import type { Ticket } from './types'
 import { buildTicket } from '../scenario/load'
-import type { Scenario } from '../scenario/types'
-import { applyInject } from '../world/world'
+import type { ScenarioMeta } from '../scenario/types'
+import { applyInject, type InjectPatch } from '../world/world'
 import type { WorldState } from '../world/types'
 
 /**
@@ -57,18 +57,12 @@ export function createQueueGenerator(
 }
 
 /**
- * Наполняет очередь до окна смены и ломает мир по вошедшим тикетам.
+ * Выбор входящих в окно — общий для плана и наполнения.
  *
- * Ведёт собственное состояние; стор зовёт его после каждого закрытия
- * или скрытия тикета. Мир — обязательный аргумент, а не отдельный шаг:
- * вход тикета в окно и поломка машины — одно событие, и вызывающий не
- * должен иметь возможности сделать одно без другого.
+ * Меняет `g`: убирает закрытые, ставит тикеты в окно, отложенных
+ * возвращает в начало пула. Возвращает id вошедших в порядке входа.
  */
-export function fillQueue(
-  g: QueueGeneratorState,
-  scenarios: Scenario[],
-  world: WorldState,
-): void {
+function select(g: QueueGeneratorState, metas: ScenarioMeta[]): string[] {
   // Закрытые тикеты покидают окно: их место освободилось для новых.
   g.tickets = g.tickets.filter(t => t.status !== 'completed')
 
@@ -88,16 +82,17 @@ export function fillQueue(
     два сценария на одной ретрансляции ломали бы друг друга так же,
     как два сценария на одной машине.
   */
-  const claims = (sc: Scenario) => [`device:${sc.device}`, ...(sc.resources ?? [])]
+  const claims = (sc: ScenarioMeta) => [`device:${sc.device}`, ...(sc.resources ?? [])]
   const busy = new Set(g.tickets.flatMap(t => {
-    const sc = scenarios.find(s => s.id === t.scenarioId)
+    const sc = metas.find(s => s.id === t.scenarioId)
     return sc ? claims(sc) : [`device:${t.device}`]
   }))
   const waiting: string[] = []
+  const entered: string[] = []
 
   while (g.tickets.length < g.window && g.pool.length > 0) {
     const id = g.pool.shift()!
-    const sc = scenarios.find(s => s.id === id)
+    const sc = metas.find(s => s.id === id)
     // Экземпляр без сценария — мусор в пуле, а не отложенное дело.
     if (!sc) continue
 
@@ -108,24 +103,54 @@ export function fillQueue(
 
     for (const c of claims(sc)) busy.add(c)
     g.tickets.push(buildTicket(sc))
-
-    /*
-      Поломка вносится при входе в окно, а не при старте смены.
-
-      Раньше мир ломался сразу по всей библиотеке, и откладывание
-      экземпляра на занятой машине защищало только очередь: в мире
-      обе поломки уже сидели на одной машине. Сегодня машины у всех
-      сценариев разные, и дефект не виден; с вариантами сценариев в
-      срезе 8 он выстрелил бы первым же совпадением.
-    */
-    if (!g.injected.includes(id)) {
-      applyInject(world, sc.inject)
-      g.injected.push(id)
-    }
+    entered.push(id)
   }
 
   // Отложенные возвращаются в начало: они ждали дольше остальных.
   g.pool.unshift(...waiting)
 
   g.exhausted = g.pool.length === 0 && g.tickets.length === 0
+  return entered
+}
+
+/**
+ * Какие сценарии войдут в окно при следующем наполнении — без наполнения.
+ *
+ * Стор получает поломку тикета с сервера (капсулой) до того, как тикет
+ * войдёт в окно: сначала план, потом капсулы, потом `fillQueue`. Правило
+ * выбора одно, поэтому план и наполнение не могут разойтись.
+ */
+export function planFill(g: QueueGeneratorState, metas: ScenarioMeta[]): string[] {
+  return select(structuredClone(g), metas)
+}
+
+/**
+ * Наполняет очередь до окна смены и ломает мир по вошедшим тикетам.
+ *
+ * Ведёт собственное состояние; стор зовёт его после каждого закрытия
+ * или скрытия тикета. Мир — обязательный аргумент, а не отдельный шаг:
+ * вход тикета в окно и поломка машины — одно событие, и вызывающий не
+ * должен иметь возможности сделать одно без другого. Поломку называет
+ * `injectFor` — капсула тикета с сервера.
+ */
+export function fillQueue(
+  g: QueueGeneratorState,
+  metas: ScenarioMeta[],
+  world: WorldState,
+  injectFor: (id: string) => InjectPatch[],
+): void {
+  for (const id of select(g, metas)) {
+    /*
+      Поломка вносится при входе в окно, а не при старте смены.
+
+      Раньше мир ломался сразу по всей библиотеке, и откладывание
+      экземпляра на занятой машине защищало только очередь: в мире
+      обе поломки уже сидели на одной машине. Скрытый и вернувшийся
+      тикет машину заново не ломает — начатая починка не откатывается.
+    */
+    if (!g.injected.includes(id)) {
+      applyInject(world, injectFor(id))
+      g.injected.push(id)
+    }
+  }
 }

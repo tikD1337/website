@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { allHold } from '../scenario/check'
 import { briefFor, contactBrief } from './brief'
 import { loadScenarios, loadScenario } from '../scenario/load'
 import { SCENARIOS } from '../../scenarios'
@@ -21,7 +22,7 @@ describe('сводка не содержит разгадки', () => {
     const { world, tickets } = loadScenarios(SCENARIOS)
 
     for (const s of SCENARIOS) {
-      const dump = JSON.stringify(briefFor(s, tickets.find(t => t.scenarioId === s.id)!, world))
+      const dump = JSON.stringify(briefFor(s, tickets.find(t => t.scenarioId === s.id)!, world, false))
       const secrets = [
         s.rootCause,
         ...s.objectives.flatMap(o => [o.title, o.why, ...o.steps]),
@@ -42,7 +43,7 @@ describe('сводка заявителя', () => {
   */
   it('несёт карточку, жалобу и знания персоны, а состояние — из мира', () => {
     const { world, ticket } = loadScenario(identityAccountLockout)
-    const brief = briefFor(identityAccountLockout, ticket, world)
+    const brief = briefFor(identityAccountLockout, ticket, world, allHold(world, identityAccountLockout.fixedWhen))
 
     expect(brief).toMatchObject({
       displayName: 'Elena Varga',
@@ -54,12 +55,12 @@ describe('сводка заявителя', () => {
     expect(brief.scripted[0]).toEqual(identityAccountLockout.persona.scripted[0])
 
     applyInject(world, [{ path: 'org.users[samAccountName=e.varga].lockedOut', value: false }])
-    expect(briefFor(identityAccountLockout, ticket, world).problemGone).toBe(true)
+    expect(briefFor(identityAccountLockout, ticket, world, allHold(world, identityAccountLockout.fixedWhen)).problemGone).toBe(true)
   })
 
   it('отдаёт копии массивов, а не ссылки на сценарий', () => {
     const { world, ticket } = loadScenario(identityAccountLockout)
-    briefFor(identityAccountLockout, ticket, world).knows.push('подделка')
+    briefFor(identityAccountLockout, ticket, world, allHold(world, identityAccountLockout.fixedWhen)).knows.push('подделка')
     expect(identityAccountLockout.persona.knows).not.toContain('подделка')
   })
 })

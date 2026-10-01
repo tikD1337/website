@@ -65,6 +65,9 @@ export function validateProgress(raw: unknown): ValidationError[] {
       if (typeof c.points !== 'number') errors.push({ code: 'bad_points', message: 'карточка без очков', record: r })
       if (!Array.isArray(c.dimensions)) errors.push({ code: 'bad_dimensions', message: 'карточка без измерений', record: r })
       if (!Array.isArray(c.silentFaults)) errors.push({ code: 'bad_silentFaults', message: 'карточка без silentFaults', record: r })
+      if (c.rootCause !== undefined && typeof c.rootCause !== 'string') {
+        errors.push({ code: 'bad_rootCause', message: 'причина в карточке не текст', record: r })
+      }
     }
 
     // Детерминированный id

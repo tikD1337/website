@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { allHold } from '../scenario/check'
 import { scriptedReply, similarity, bestMatch } from './scripted'
 import { detectIntent } from './intent'
 import { briefFor, contactBrief } from './brief'
@@ -15,7 +16,7 @@ function ask(brief: PersonaBrief, said: string, history: DialogueRequest['histor
 
 const lockout = () => {
   const { world, ticket } = loadScenario(identityAccountLockout)
-  return briefFor(identityAccountLockout, ticket, world)
+  return briefFor(identityAccountLockout, ticket, world, allHold(world, identityAccountLockout.fixedWhen))
 }
 
 const shareAccess = (fixed = false) => {
@@ -26,7 +27,7 @@ const shareAccess = (fixed = false) => {
       value: ['GRP-All-Staff', 'GRP-Printer-Floor3', 'GRP-Finance-Reports'],
     }])
   }
-  return briefFor(identityShareAccess, ticket, world)
+  return briefFor(identityShareAccess, ticket, world, allHold(world, identityShareAccess.fixedWhen))
 }
 
 describe('разбор реплики', () => {
@@ -107,7 +108,7 @@ describe('ответ по заготовкам', () => {
 
     const { world, ticket } = loadScenario(identityAccountLockout)
     applyInject(world, [{ path: 'org.users[samAccountName=e.varga].lockedOut', value: false }])
-    expect(ask(briefFor(identityAccountLockout, ticket, world), 'Попробуйте войти сейчас').text)
+    expect(ask(briefFor(identityAccountLockout, ticket, world, allHold(world, identityAccountLockout.fixedWhen)), 'Попробуйте войти сейчас').text)
       .toContain('пустило')
 
     const r = ask(shareAccess(true), 'Попробуйте открыть сейчас', [], 'n.haruna')

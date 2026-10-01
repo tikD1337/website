@@ -77,7 +77,7 @@ import type { Clock, WorldState } from '../core/world/types'
 import type { SessionLog, DialogueChannel } from '../core/session/types'
 import type { QueueState } from '../core/tickets/queue'
 import type { WorkflowStatus, ResolutionCode } from '../core/tickets/types'
-import type { Scenario } from '../core/scenario/types'
+import { metaOf, type Scenario } from '../core/scenario/types'
 import type { ServiceStartType } from '../core/world/types'
 import type { Progress, TicketRecord } from '../core/progress/types'
 import { emptyProgress } from '../core/progress/types'
@@ -411,7 +411,7 @@ export function createGameStore(
     if (first) generator.pool = [first, ...generator.pool.filter(id => id !== first)]
     generator.exhausted = false
     generator.injected = []
-    fillQueue(generator, library, world)
+    fillQueue(generator, library.map(metaOf), world, id => scenarioFor(id).inject)
     return {
       world,
       queue: createQueue(generator.tickets),
@@ -876,7 +876,7 @@ export function createGameStore(
       const isRequester = withWhom === ticket.requester
 
       const brief = isRequester
-        ? briefFor(scenario, ticket, st.world)
+        ? briefFor(scenario, ticket, st.world, allHold(st.world, scenario.fixedWhen))
         : contactBrief(st.world, withWhom)
 
       // История именно этого разговора: реплики другим собеседникам
@@ -1362,7 +1362,7 @@ export function createGameStore(
       */
       if (ticket.resolutionCode === 'escalate') applyInject(st.world, scenario.onEscalate ?? [])
 
-      fillQueue(generator, library, st.world)
+      fillQueue(generator, library.map(metaOf), st.world, id => scenarioFor(id).inject)
 
       /*
         Единственная точка записи прохождения: после оценки, после
@@ -1420,7 +1420,7 @@ export function createGameStore(
       // Возвращаем в пул — без штрафа, это отложенное дело.
       generator.pool.push(t.scenarioId)
       generator.tickets = q.tickets.filter(x => x.number !== number)
-      fillQueue(generator, library, st.world)
+      fillQueue(generator, library.map(metaOf), st.world, id => scenarioFor(id).inject)
 
       /*
         Скрыли чужой тикет — текущий остаётся на вас.

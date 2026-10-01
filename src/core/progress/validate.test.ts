@@ -40,6 +40,12 @@ describe('разбор прочитанного из хранилища', () => 
     const noPoints = rec()
     ;(noPoints.card as Partial<typeof noPoints.card>).points = undefined as never
     expect(codes(progress([noPoints]))).toContain('bad_points')
+
+    // Причина в карточке появилась в срезе 8А: её нет — норма, она не строка — порча.
+    const oddCause = rec()
+    ;(oddCause.card as unknown as Record<string, unknown>)['rootCause'] = 42
+    expect(codes(progress([oddCause]))).toEqual(['bad_rootCause'])
+    expect(codes(progress([rec({ card: { ...rec().card, rootCause: 'причина' } })]))).toEqual([])
   })
 
   /**

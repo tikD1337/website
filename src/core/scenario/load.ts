@@ -1,7 +1,7 @@
 import { createWorld, applyInject } from '../world/world'
 import type { WorldState } from '../world/types'
 import type { Ticket } from '../tickets/types'
-import type { Scenario } from './types'
+import type { Scenario, ScenarioMeta } from './types'
 
 /**
  * Детерминированный номер инцидента из идентификатора сценария.
@@ -85,7 +85,7 @@ export function loadScenario(s: Scenario): { world: WorldState; ticket: Ticket }
   return { world, ticket: buildTicket(s) }
 }
 
-export function buildTicket(s: Scenario): Ticket {
+export function buildTicket(s: ScenarioMeta): Ticket {
   return {
     number: incidentNumber(s.id),
     scenarioId: s.id,

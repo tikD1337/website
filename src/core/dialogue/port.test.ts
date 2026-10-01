@@ -3,13 +3,14 @@ import { createDialogue } from './port'
 import { askModel, type FetchLike } from './openai'
 import { systemPrompt, buildMessages } from './prompt'
 import { briefFor } from './brief'
+import { allHold } from '../scenario/check'
 import { defaultConfig, type DialogueConfig, type DialogueRequest, type Turn } from './types'
 import { loadScenario } from '../scenario/load'
 import { SCENARIOS } from '../../scenarios'
 import { identityAccountLockout } from '../../scenarios/identity-account-lockout'
 
 const { world, ticket } = loadScenario(identityAccountLockout)
-const brief = briefFor(identityAccountLockout, ticket, world)
+const brief = briefFor(identityAccountLockout, ticket, world, allHold(world, identityAccountLockout.fixedWhen))
 
 const req = (said = 'Когда это началось?'): DialogueRequest => ({
   channel: 'call', withWhom: 'e.varga', brief, said, history: [],
@@ -258,7 +259,7 @@ describe('промпт', () => {
     for (const s of SCENARIOS) {
       const { world: w, ticket: t } = loadScenario(s)
       const text = systemPrompt({
-        channel: 'call', withWhom: s.requester, brief: briefFor(s, t, w),
+        channel: 'call', withWhom: s.requester, brief: briefFor(s, t, w, allHold(w, s.fixedWhen)),
         said: 'Здравствуйте', history: [],
       })
       expect(text, s.id).not.toContain(s.rootCause)

@@ -1,7 +1,6 @@
-import { allHold } from '../scenario/check'
 import { findUser } from '../directory/accounts'
 import type { WorldState } from '../world/types'
-import type { Scenario } from '../scenario/types'
+import type { Persona } from '../scenario/types'
 import type { Ticket } from '../tickets/types'
 import type { PersonaBrief } from './types'
 
@@ -23,9 +22,16 @@ import type { PersonaBrief } from './types'
  * автора: сводка сериализуется и в ней ищутся запрещённые строки.
  */
 export function briefFor(
-  scenario: Scenario,
+  scenario: { persona: Persona; confirmReplies: [string, string] },
   ticket: Ticket,
   world: WorldState,
+  /**
+   * Ушла ли проблема заявителя — по условиям починки сценария.
+   *
+   * Вычисляется не здесь: условия починки — решение сценария, и с
+   * переездом контента на сервер (срез 8А) их знает только сервер.
+   */
+  problemGone: boolean,
 ): PersonaBrief {
   const user = findUser(world, ticket.requester)
 
@@ -43,7 +49,7 @@ export function briefFor(
       при неполадке с печатью его не волнует сетевой адаптер. То же
       условие, по которому он подтверждает результат по телефону.
     */
-    problemGone: allHold(world, scenario.fixedWhen),
+    problemGone,
     confirmReplies: [...scenario.confirmReplies] as [string, string],
   }
 }

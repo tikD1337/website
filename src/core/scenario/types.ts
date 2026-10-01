@@ -212,3 +212,25 @@ export interface Scenario {
    */
   onEscalate?: InjectPatch[]
 }
+
+/**
+ * Карточка сценария — то, что видно в очереди.
+ *
+ * С переездом контента на сервер (срез 8А) браузер знает о сценарии
+ * только это: генератору очереди хватает машины и общих ресурсов, тикету
+ * — его полей. Поломка приходит капсулой при входе тикета в окно, решение
+ * не приходит вовсе.
+ */
+export type ScenarioMeta = Pick<Scenario,
+  'id' | 'category' | 'subcategory' | 'priority' | 'service' | 'summary' | 'description'
+  | 'requester' | 'device' | 'slaResponseHours' | 'slaResolveHours' | 'resources'>
+
+export function metaOf(s: Scenario): ScenarioMeta {
+  return {
+    id: s.id, category: s.category, subcategory: s.subcategory, priority: s.priority,
+    service: s.service, summary: s.summary, description: s.description,
+    requester: s.requester, device: s.device,
+    slaResponseHours: s.slaResponseHours, slaResolveHours: s.slaResolveHours,
+    ...(s.resources ? { resources: [...s.resources] } : {}),
+  }
+}
