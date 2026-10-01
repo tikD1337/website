@@ -1,5 +1,5 @@
 import type { QuizGrade } from './answer'
-import type { Course, Learning, QuizResult } from './types'
+import type { Answer, Course, Learning, QuizResult } from './types'
 
 /**
  * Статусы курса и запись прогресса.
@@ -79,8 +79,12 @@ export function courseState(course: Course, l: Learning): CourseState {
   }
 }
 
-export function recordCheck(l: Learning, path: string): Learning {
-  return l.checks.includes(path) ? l : { ...l, checks: [...l.checks, path] }
+export function recordCheck(
+  l: Learning, path: string, given?: { answer: Answer; why: string | null },
+): Learning {
+  const checks = l.checks.includes(path) ? l.checks : [...l.checks, path]
+  if (!given) return checks === l.checks ? l : { ...l, checks }
+  return { ...l, checks, answers: { ...l.answers, [path]: { ...given } } }
 }
 
 /** Каждая попытка пишется; дата сдачи — первая, лучший результат — максимум. */
@@ -117,5 +121,7 @@ export function mergeLearning(loaded: Learning, inMemory: Learning): Learning {
       : { ...q }
   })
   const fresh = inMemory.quizzes.filter(m => !loaded.quizzes.some(q => q.id === m.id)).map(q => ({ ...q }))
-  return { checks, quizzes: [...quizzes, ...fresh] }
+  // Ответы: загруженные, поверх — данные до конца загрузки, они свежее.
+  const answers = loaded.answers || inMemory.answers ? { ...loaded.answers, ...inMemory.answers } : undefined
+  return { ...(answers ? { answers } : {}), checks, quizzes: [...quizzes, ...fresh] }
 }

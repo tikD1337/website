@@ -88,11 +88,17 @@ describe('статусы курса', () => {
     const once = recordCheck(emptyLearning(), 'c/s1/l1/a')
     expect(recordCheck(once, 'c/s1/l1/a').checks).toEqual(['c/s1/l1/a'])
 
+    // Верный ответ запоминается с разбором: с сервера разбор приходит один раз, а урок открывают снова.
+    const given = recordCheck(emptyLearning(), 'c/s1/l1/a', { answer: 1, why: 'потому что' })
+    expect(given).toEqual({ checks: ['c/s1/l1/a'], quizzes: [], answers: { 'c/s1/l1/a': { answer: 1, why: 'потому что' } } })
+
     const loaded: Learning = {
       checks: ['c/s1/l1/a', 'c/s1/l1/b'],
       quizzes: [{ id: 'c/s1', attempts: 2, best: 3, total: 5, passedAt: null }],
+      answers: { 'c/s1/l1/a': { answer: 0, why: 'старый' }, 'c/s1/l1/b': { answer: 'x', why: null } },
     }
     const inMemory: Learning = {
+      answers: { 'c/s1/l1/b': { answer: 'y', why: 'новый' } },
       checks: ['c/s1/l1/b', 'c/s1/l2/a'],
       quizzes: [
         { id: 'c/s1', attempts: 1, best: 5, total: 5, passedAt: '2026-09-30T12:00:00.000Z' },
@@ -101,6 +107,7 @@ describe('статусы курса', () => {
     }
     const before = structuredClone({ loaded, inMemory })
     expect(mergeLearning(loaded, inMemory)).toEqual({
+      answers: { 'c/s1/l1/a': { answer: 0, why: 'старый' }, 'c/s1/l1/b': { answer: 'y', why: 'новый' } },
       checks: ['c/s1/l1/a', 'c/s1/l1/b', 'c/s1/l2/a'],
       quizzes: [
         { id: 'c/s1', attempts: 3, best: 5, total: 5, passedAt: '2026-09-30T12:00:00.000Z' },

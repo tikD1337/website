@@ -90,5 +90,7 @@ describe('ход интервью', () => {
       ['exp-any', ['cause'], []],
     ])
     expect(result.items[3]).toMatchObject({ prompt: 'Трудный случай?', expected: 'Любой.', answers: ['причина была в порту'] })
+    // Пункты с названием и разбором едут в результате: разбор больше не читает трек (срез 8А).
+    expect(result.items[1]!.points).toEqual([{ id: 't1-a', label: 't1-a', why: 'нужно t1-a' }, { id: 't1-b', label: 't1-b', why: 'нужно t1-b' }])
   })
 })

@@ -58,6 +58,7 @@ export function gradeInterview(t: InterviewTrack, run: InterviewRun): InterviewR
       id, stage: q.stage, prompt: questionText(t, run, id), answers,
       ...coverage(q, answers),
       expected: q.expected,
+      points: q.points.map(p => ({ id: p.id, label: p.label, why: p.why })),
     }
   })
   const mean = (stage: QuestionResult['stage']) => {

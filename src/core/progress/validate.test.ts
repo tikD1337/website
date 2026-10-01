@@ -115,6 +115,7 @@ describe('разбор прочитанного из хранилища', () => 
 
     const quiz = { id: 'first-line/network', attempts: 1, best: 5, total: 5, passedAt: '2026-09-30T10:00:00.000Z' }
     expect(codes({ ...old, learning: { checks: ['c/s/l/k'], quizzes: [quiz, { ...quiz, passedAt: null }] } }), 'целое').toEqual([])
+    expect(codes({ ...old, learning: { checks: ['c/s/l/k'], quizzes: [], answers: { 'c/s/l/k': { answer: 1, why: null } } } }), 'с ответами').toEqual([])
 
     const broken: Array<[string, unknown]> = [
       ['не объект', 'x'],
@@ -127,6 +128,9 @@ describe('разбор прочитанного из хранилища', () => 
       ['всего не число', { checks: [], quizzes: [{ ...quiz, total: undefined }] }],
       ['дата сдачи не строка', { checks: [], quizzes: [{ ...quiz, passedAt: 5 }] }],
       ['квиз null', { checks: [], quizzes: [null] }],
+      ['ответы не объект', { checks: [], quizzes: [], answers: [] }],
+      ['ответ без разбора', { checks: [], quizzes: [], answers: { 'c/s/l/k': { answer: 1 } } }],
+      ['ответ не число и не текст', { checks: [], quizzes: [], answers: { 'c/s/l/k': { answer: true, why: null } } }],
     ]
     for (const [name, learning] of broken) {
       expect(codes({ ...old, learning }), name).toEqual(['bad_learning'])
@@ -151,6 +155,8 @@ describe('разбор прочитанного из хранилища', () => 
       result: { verdict: 'maybe', intro: 1, technical: 0.5, experience: 0, questionsAsked: 1, items: [item] },
     }
     expect(codes({ ...old, interviews: [record] }), 'целая').toEqual([])
+    const points = [{ id: 'dhcp', label: 'DHCP', why: 'адрес выдаёт DHCP' }]
+    expect(codes({ ...old, interviews: [{ ...record, result: { ...record.result, items: [{ ...item, points }] } }] }), 'с пунктами').toEqual([])
 
     const broken: Array<[string, unknown]> = [
       ['не массив', {}],
@@ -164,6 +170,8 @@ describe('разбор прочитанного из хранилища', () => 
       ['ответы не строки', [{ ...record, result: { ...record.result, items: [{ ...item, answers: [{}] }] } }]],
       ['пропущенные не строки', [{ ...record, result: { ...record.result, items: [{ ...item, missing: [1] }] } }]],
       ['без образцового ответа', [{ ...record, result: { ...record.result, items: [{ ...item, expected: undefined }] } }]],
+      ['пункты разбора не массив', [{ ...record, result: { ...record.result, items: [{ ...item, points: {} }] } }]],
+      ['пункт без названия', [{ ...record, result: { ...record.result, items: [{ ...item, points: [{ id: 'a', why: 'b' }] }] } }]],
     ]
     for (const [name, interviews] of broken) {
       expect(codes({ ...old, interviews }), name).toEqual(['bad_interview'])

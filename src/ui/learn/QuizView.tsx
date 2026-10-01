@@ -3,7 +3,8 @@ import { useGame } from '../../store/useGame'
 import { courseState, quizPath } from '../../core/learning/state'
 import type { QuizGrade } from '../../core/learning/answer'
 import type { Answer, Course, Section } from '../../core/learning/types'
-import { AnswerInput, Rich, answerText, rightAnswer } from './LessonView'
+import { AnswerInput, Rich, answerText } from './LessonView'
+import { rightAnswer } from '../../core/learning/answer'
 
 /**
  * Квиз секции: все вопросы разом, «Сдать», итог с разбором.

@@ -77,4 +77,12 @@ export interface QuizResult {
 export interface Learning {
   checks: string[]
   quizzes: QuizResult[]
+  /**
+   * Верные ответы проверок с разбором, по адресу проверки.
+   *
+   * Разбор приходит с сервера один раз — в ответ на ответ (срез 8А), а
+   * урок открывают снова: отвеченная проверка показывает сохранённое.
+   * Прогресс прошлого формата этого поля не несёт.
+   */
+  answers?: Record<string, { answer: Answer; why: string | null }>
 }

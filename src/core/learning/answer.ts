@@ -29,7 +29,21 @@ export interface QuizGrade {
   score: number
   total: number
   passed: boolean
-  items: Array<{ id: string; correct: boolean; why: string | null }>
+  /**
+   * `right` — верный ответ словами: только у сданного квиза и только у
+   * ошибки. Несданный квиз ответов не выдаёт — иначе пересдача стала бы
+   * переписыванием с экрана; с сервером это правило держит он сам.
+   */
+  items: Array<{ id: string; correct: boolean; why: string | null; right: { text: string; why: string } | null }>
+}
+
+/** Верный ответ словами — для пройденной проверки и сданного квиза. */
+export function rightAnswer(check: Check): { text: string; why: string } {
+  if (check.kind === 'choice') {
+    const o = check.options.find(x => x.correct)!
+    return { text: o.text, why: o.why }
+  }
+  return { text: check.accept[0]!, why: check.why }
 }
 
 /** Квиз сдан при 80 % верных: 4 из 5. */
@@ -50,6 +64,9 @@ export function gradeQuiz(quiz: Check[], answers: Record<string, Answer>): QuizG
     score,
     total: quiz.length,
     passed,
-    items: verdicts.map(v => ({ id: v.id, correct: v.correct, why: passed || !v.correct ? v.why : null })),
+    items: verdicts.map((v, i) => ({
+      id: v.id, correct: v.correct, why: passed || !v.correct ? v.why : null,
+      right: passed && !v.correct ? rightAnswer(quiz[i]!) : null,
+    })),
   }
 }

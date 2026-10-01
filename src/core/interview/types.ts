@@ -101,6 +101,14 @@ export interface QuestionResult {
   missing: string[]
   score: number
   expected: string
+  /**
+   * Пункты вопроса с названием и разбором, в порядке вопроса.
+   *
+   * Разбор читает их из результата, а не из трека: трек с переездом на
+   * сервер (срез 8А) браузеру не приходит. Записи прошлого формата
+   * пунктов не несут — разбор показывает их id.
+   */
+  points?: Array<{ id: string; label: string; why: string }>
 }
 
 export interface InterviewResult {

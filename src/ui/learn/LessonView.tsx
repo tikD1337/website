@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useGame, type PracticeResult } from '../../store/useGame'
 import { checkPath, courseState } from '../../core/learning/state'
+import { rightAnswer } from '../../core/learning/answer'
 import type { Answer, Block, Check, Course, Lesson, Section } from '../../core/learning/types'
 import { VERDICT } from '../verdict'
 import { formatDateTime } from '../dates'
@@ -66,14 +67,6 @@ export function answerText(check: Check, a: Answer | undefined): string {
   return String(a)
 }
 
-/** Верный ответ словами — для пройденной проверки и сданного квиза. */
-export function rightAnswer(check: Check): { text: string; why: string } {
-  if (check.kind === 'choice') {
-    const o = check.options.find(x => x.correct)!
-    return { text: o.text, why: o.why }
-  }
-  return { text: check.accept[0]!, why: check.why }
-}
 
 function CheckItem({ check, path, done, onAnswer }: {
   check: Check

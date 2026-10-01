@@ -127,6 +127,14 @@ function isQuestionResult(raw: unknown): boolean {
   return isString(q['id']) && isString(q['stage']) && isString(q['prompt']) && isString(q['expected'])
     && typeof q['score'] === 'number'
     && isStrings(q['answers']) && isStrings(q['covered']) && isStrings(q['missing'])
+    && (q['points'] === undefined || (Array.isArray(q['points']) && q['points'].every(isPoint)))
+}
+
+/** Пункт разбора интервью — срез 8А; у записей прошлого формата его нет. */
+function isPoint(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null) return false
+  const p = raw as Record<string, unknown>
+  return isString(p['id']) && isString(p['label']) && isString(p['why'])
 }
 
 function isLearning(raw: unknown): boolean {
@@ -134,6 +142,18 @@ function isLearning(raw: unknown): boolean {
   const l = raw as Record<string, unknown>
   return Array.isArray(l['checks']) && l['checks'].every(isString)
     && Array.isArray(l['quizzes']) && l['quizzes'].every(isQuizResult)
+    && (l['answers'] === undefined || isAnswers(l['answers']))
+}
+
+/** Сохранённые ответы проверок — срез 8А; прогресс прошлого формата их не несёт. */
+function isAnswers(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return false
+  return Object.values(raw).every(v => {
+    if (typeof v !== 'object' || v === null) return false
+    const a = v as Record<string, unknown>
+    return (typeof a['answer'] === 'number' || isString(a['answer']))
+      && (a['why'] === null || isString(a['why']))
+  })
 }
 
 function isQuizResult(raw: unknown): boolean {

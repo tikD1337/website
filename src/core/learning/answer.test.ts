@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { checkAnswer, gradeQuiz } from './answer'
+import { checkAnswer, gradeQuiz, rightAnswer } from './answer'
 import type { Answer, Check } from './types'
 
 const choice: Check = {
@@ -39,22 +39,36 @@ describe('квиз секции', () => {
   const q = (id: string): Check => ({ ...choice, id })
   const quiz = ['q1', 'q2', 'q3', 'q4', 'q5'].map(q)
 
-  it('квиз: порог 4 из 5, у несданного разобраны только неверные', () => {
+  /*
+    Верный ответ называет сервер, и только сданному квизу (срез 8А):
+    раньше интерфейс брал его из контента в бандле, и правило «несданный
+    квиз не выдаёт ответов» держалось на честности кнопки.
+  */
+  it('квиз: порог 4 из 5, у несданного разобраны только неверные, верный ответ — только сданному', () => {
     const passed = gradeQuiz(quiz, { q1: 1, q2: 1, q3: 1, q4: 1, q5: 0 })
     expect(passed).toMatchObject({ score: 4, total: 5, passed: true })
     expect(passed.items.map(i => i.why === null)).toEqual([false, false, false, false, false])
+    expect(passed.items.map(i => i.right)).toEqual([null, null, null, null,
+      { text: 'DHCP не ответил', why: 'Система не дождалась аренды и назначила адрес сама.' }])
 
     // q4 без ответа: считается неверным и не роняет оценку
     const failed = gradeQuiz(quiz, { q1: 1, q2: 1, q3: 1, q5: 0 })
     expect(failed).toEqual({
       score: 3, total: 5, passed: false,
       items: [
-        { id: 'q1', correct: true, why: null },
-        { id: 'q2', correct: true, why: null },
-        { id: 'q3', correct: true, why: null },
-        { id: 'q4', correct: false, why: null },
-        { id: 'q5', correct: false, why: 'DNS тут ни при чём: адрес выдаёт DHCP.' },
+        { id: 'q1', correct: true, why: null, right: null },
+        { id: 'q2', correct: true, why: null, right: null },
+        { id: 'q3', correct: true, why: null, right: null },
+        { id: 'q4', correct: false, why: null, right: null },
+        { id: 'q5', correct: false, why: 'DNS тут ни при чём: адрес выдаёт DHCP.', right: null },
       ],
     })
+  })
+})
+
+describe('верный ответ словами', () => {
+  it('у выбора — текст верного варианта, у ввода — первый допустимый ответ', () => {
+    expect(rightAnswer(choice)).toEqual({ text: 'DHCP не ответил', why: 'Система не дождалась аренды и назначила адрес сама.' })
+    expect(rightAnswer(text)).toEqual({ text: 'ipconfig /release', why: 'Освобождение снимает удержание самоназначенного адреса.' })
   })
 })
