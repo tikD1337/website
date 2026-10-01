@@ -732,11 +732,33 @@ describe('интервью', () => {
     expect(s().interview!.transcript.map(l => l.text)).toContain('Хорошо, спасибо.')
   })
 
+  /*
+    Ход интервью считает сервер (срез 8А): уточнять ли и какой вопрос
+    следующий, решают пункты, которых у браузера нет. Сбой связи не
+    должен терять запуск и оставлять «думает» навсегда.
+  */
+  it('сбой сервера на ответе не теряет запуск и снимает «думает»', async () => {
+    const d = deferred(testContent())
+    g = createGameStore(clockAt('2026-09-30T10:00:00.000Z'), undefined, undefined, d.port)
+    await d.flush()
+    const started = s().startInterview('first-line')
+    await d.flush()
+    expect(await started).toEqual({ ok: true })
+    const before = s().interview
+
+    const p = s().answerInterview('Я бы начал с ipconfig.')
+    expect(s().interviewBusy).toBe(true)
+    await d.fail(new ContentError('unavailable', UNAVAILABLE))
+    await p
+    expect(s()).toMatchObject({ interviewBusy: false, interviewNotice: UNAVAILABLE })
+    expect(s().interview, 'запуск прежний: ответ не засчитан').toEqual(before)
+  })
+
   it('законченное интервью записано и открыто', async () => {
     s().startInterview('first-line')
     while (s().interview!.stage !== 'questions') await s().answerInterview('не знаю')
     await s().askInterviewer('Какой у вас график смен?')
-    const record = s().finishInterview()!
+    const record = (await s().finishInterview())!
 
     expect(s()).toMatchObject({ interview: null, interviewOpen: record.id, activeTool: 'interview' })
     expect(record).toMatchObject({ track: 'first-line', attempt: 0, result: { verdict: 'no', questionsAsked: 1 } })

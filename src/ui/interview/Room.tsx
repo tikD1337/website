@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { useGame } from '../../store/useGame'
 import { speak } from '../speech/speak'
 import { listenOnce, listenAvailable, type Listener } from '../speech/listen'
-import type { InterviewRun, InterviewTrack } from '../../core/interview/types'
+import type { InterviewRun } from '../../core/interview/types'
+import type { TrackMeta } from '../../content/port'
 
 /** Этапы по порядку: это последовательность, поэтому номера. */
-function Stages({ track, run }: { track: InterviewTrack; run: InterviewRun }) {
+function Stages({ track, run }: { track: TrackMeta; run: InterviewRun }) {
   const technicalDone = Math.max(0, Math.min(run.index - 1, track.perInterview))
   const steps: Array<{ id: InterviewRun['stage']; label: string }> = [
     { id: 'intro', label: 'Знакомство' },
@@ -27,7 +28,7 @@ function Stages({ track, run }: { track: InterviewTrack; run: InterviewRun }) {
   )
 }
 
-export function Room({ track, run }: { track: InterviewTrack; run: InterviewRun }) {
+export function Room({ track, run }: { track: TrackMeta; run: InterviewRun }) {
   const busy = useGame(s => s.interviewBusy)
   const notice = useGame(s => s.interviewNotice)
   const config = useGame(s => s.dialogueConfig)

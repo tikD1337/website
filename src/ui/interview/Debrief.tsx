@@ -1,5 +1,6 @@
 import { useGame } from '../../store/useGame'
-import { VERDICT_LABEL, type InterviewRecord, type InterviewTrack, type Verdict } from '../../core/interview/types'
+import { VERDICT_LABEL, type InterviewRecord, type Verdict } from '../../core/interview/types'
+import type { TrackMeta } from '../../content/port'
 import { formatDateTime } from '../dates'
 
 /** Вердикт интервью — теми же классами суждения, что и вердикт тикета. */
@@ -9,18 +10,19 @@ const percent = (x: number) => `${Math.round(x * 100)} %`
 
 /**
  * Разбор интервью: что прозвучало, чего не хватило, какого ответа ждали.
- * Названия пунктов и их разбор берутся из трека; запись хранит только
- * id — если трек с тех пор поменялся, пункт показывается своим id.
+ * Названия пунктов и их разбор приходят в результате (срез 8А): трек с
+ * пунктами живёт на сервере. Запись прошлого формата их не несёт —
+ * пункт показывается своим id.
  */
-export function Debrief({ record, track }: { record: InterviewRecord; track: InterviewTrack | undefined }) {
+export function Debrief({ record, track }: { record: InterviewRecord; track: TrackMeta | undefined }) {
   const open = useGame(s => s.openInterview)
   const start = useGame(s => s.startInterview)
   const r = record.result
-  const questionOf = (qid: string) => track && [track.intro, ...track.technical, ...track.experience].find(x => x.id === qid)
-  const pointOf = (qid: string, pid: string) => questionOf(qid)?.points.find(p => p.id === pid)
+  const itemOf = (qid: string) => r.items.find(x => x.id === qid)
+  const pointOf = (qid: string, pid: string) => itemOf(qid)?.points?.find(p => p.id === pid)
   /** Пункты в порядке вопроса, а не «сначала прозвучавшие»: так разбор читается как чек-лист. */
   const pointOrder = (qid: string, ids: string[]) => {
-    const order = questionOf(qid)?.points.map(p => p.id) ?? []
+    const order = itemOf(qid)?.points?.map(p => p.id) ?? []
     return [...ids].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99))
   }
   const technical = r.items.filter(i => i.stage === 'technical')
@@ -79,7 +81,7 @@ export function Debrief({ record, track }: { record: InterviewRecord; track: Int
       ))}
 
       <div className="bar">
-        <button className="act primary" type="button" onClick={() => start(record.track)}>Пройти ещё раз</button>
+        <button className="act primary" type="button" onClick={() => void start(record.track)}>Пройти ещё раз</button>
       </div>
     </>
   )

@@ -3,6 +3,10 @@ import { VERDICT_LABEL } from '../core/interview/types'
 import { Room } from './interview/Room'
 import { Debrief, VERDICT_TONE } from './interview/Debrief'
 import { formatDateTime } from './dates'
+import type { TrackMeta } from '../content/port'
+
+/** Пока каталог не пришёл с сервера, треков нет. */
+const NO_TRACKS: TrackMeta[] = []
 
 /**
  * Интервью: начало и история попыток → комната → разбор.
@@ -12,7 +16,7 @@ import { formatDateTime } from './dates'
  * прервать его можно только с подтверждением.
  */
 export function InterviewView() {
-  const tracks = useGame(s => s.tracks)
+  const tracks = useGame(s => s.catalog?.tracks ?? NO_TRACKS)
   const run = useGame(s => s.interview)
   const openId = useGame(s => s.interviewOpen)
   const records = useGame(s => s.progress.interviews)

@@ -727,7 +727,7 @@ describe('интервью', () => {
     expect(s().interview!.transcript.at(-1)!.text)
       .toBe('Две смены по будням: с восьми до пяти и с одиннадцати до восьми. В выходные — дежурства по графику, раз в месяц.')
 
-    const { result } = s().finishInterview()!
+    const { result } = (await s().finishInterview())!
     expect(result).toMatchObject({ verdict: 'hire', intro: 1, technical: 1, experience: 1, questionsAsked: 1 })
     expect(result.items.map(i => [i.id, i.answers.length, i.missing])).toEqual([
       ['intro', 1, []],

@@ -14,20 +14,17 @@ import {
   courseState, recordCheck, recordQuiz, mergeLearning, checkPath, quizPath,
 } from '../core/learning/state'
 import type { Answer, Learning } from '../core/learning/types'
-import { INTERVIEWS } from '../interviews'
 import {
-  startInterview as beginInterview, answer as answerQuestion, say, askInterviewer as askQuestion,
-  faqReply, reaction, finishQuestions, questionText, type Solved,
+  say, askInterviewer as askQuestion, reaction, finishQuestions, FAQ_FALLBACK, type Solved,
 } from '../core/interview/flow'
-import { gradeInterview } from '../core/interview/grade'
-import type { InterviewRecord, InterviewRun, InterviewTrack } from '../core/interview/types'
+import type { InterviewRecord, InterviewRun } from '../core/interview/types'
 import type { KbArticle, KbStatus, KbType } from '../core/kb/types'
 import {
   createQueueGenerator, fillQueue, planFill, SHIFT_WINDOW,
 } from '../core/tickets/generate'
 import {
   settle, chain, all, isThenable, messageOf,
-  type Capsule, type Catalog, type ContentPort, type LessonContent, type MaybePromise, type QuizContent,
+  type Capsule, type Catalog, type ContentPort, type LessonContent, type MaybePromise, type QuizContent, type TrackMeta,
 } from '../content/port'
 // Временно, до сетевого разъёма (задача 9): контент ещё едет в бандле.
 import { createContentService } from '../content/server/service'
@@ -328,8 +325,6 @@ export interface GameState {
    */
   practice(scenarioId: string, newShift?: boolean): MaybePromise<PracticeResult>
 
-  /** треки интервью — проверены загрузчиком при создании стора */
-  tracks: InterviewTrack[]
   /**
    * Идущее интервью. От очереди, мира и `session` не зависит и их не
    * трогает; незаконченное не сохраняется — как незакрытый тикет.
@@ -341,10 +336,10 @@ export interface GameState {
   interviewNotice: string | null
   /** какой разбор интервью открыт */
   interviewOpen: string | null
-  startInterview(track: string): { ok: true } | { ok: false; error: string }
+  startInterview(track: string): MaybePromise<{ ok: true } | { ok: false; error: string }>
   answerInterview(text: string): Promise<void>
   askInterviewer(text: string): Promise<void>
-  finishInterview(): InterviewRecord | null
+  finishInterview(): MaybePromise<InterviewRecord | null>
   abandonInterview(): void
   openInterview(id: string | null): void
 }
@@ -372,7 +367,6 @@ export function createGameStore(
   /** библиотека сценариев; подменяется в тестах, которым нужен свой сценарий */
   /** разъём контента: сервис в тестах, сеть в приложении (задача 9) */
   content: ContentPort = createContentService({ ...LIBRARY, sign: s => s, now: () => Date.now() }),
-  tracks: InterviewTrack[] = INTERVIEWS,
 ): UseBoundStore<StoreApi<GameState>> {
   const registry = createRegistry()
   registry.register('ipconfig', ipconfig)
@@ -676,13 +670,13 @@ export function createGameStore(
     }
 
     const findCourse = (id: string) => get().catalog?.courses.find(c => c.id === id)
+    const trackOf = (id: string): TrackMeta | undefined => get().catalog?.tracks.find(t => t.id === id)
 
     return {
     ...fresh(),
     lessons: {},
     quizzes: {},
     learnAt: null,
-    tracks,
     interview: null,
     interviewBusy: false,
     interviewNotice: null,
@@ -1789,7 +1783,7 @@ export function createGameStore(
     },
 
     startInterview(trackId) {
-      const track = get().tracks.find(t => t.id === trackId)
+      const track = trackOf(trackId)
       if (!track) return { ok: false, error: 'трек интервью не найден' }
       const { records, interviews } = get().progress
       /*
@@ -1804,14 +1798,17 @@ export function createGameStore(
         }
       }
       const attempt = interviews.filter(r => r.track === track.id).length
-      set({
-        interview: beginInterview(track, attempt, solved),
-        interviewBusy: false,
-        interviewNotice: null,
-        interviewOpen: null,
-        activeTool: 'interview',
-      })
-      return { ok: true }
+      // План вопросов и первые реплики строит сервер: вопросы знает он.
+      return settle<InterviewRun, { ok: true } | { ok: false; error: string }>(() => content.interviewStart(track.id, attempt, solved), run => {
+        set({
+          interview: run,
+          interviewBusy: false,
+          interviewNotice: null,
+          interviewOpen: null,
+          activeTool: 'interview',
+        })
+        return { ok: true }
+      }, e => ({ ok: false, error: messageOf(e) }))
     },
 
     async answerInterview(text) {
@@ -1820,10 +1817,25 @@ export function createGameStore(
       const said = text.trim()
       // Пустой ответ и ответ поверх раздумий интервьюера не записываются.
       if (!run || st.interviewBusy || !said || run.stage === 'questions' || run.stage === 'done') return
-      const track = st.tracks.find(t => t.id === run.track)!
-      const question = questionText(track, run, run.plan[run.index]!)
-      const { run: heard, next } = answerQuestion(track, run, said)
-      set({ interview: heard, interviewBusy: true, interviewNotice: null })
+      const track = trackOf(run.track)!
+      // Вопрос, на который отвечают, — последняя реплика интервьюера: её и видит модель.
+      const question = [...run.transcript].reverse().find(l => l.speaker === 'interviewer')?.text ?? ''
+      // Ответ виден сразу; засчитает его и решит, что дальше, сервер.
+      const shown: InterviewRun = { ...run, transcript: [...run.transcript, { speaker: 'candidate', text: said }] }
+      set({ interview: shown, interviewBusy: true, interviewNotice: null })
+
+      let step: { run: InterviewRun; next: string | null }
+      try {
+        const x = content.interviewAnswer(run, said)
+        step = isThenable(x) ? await x : x
+      } catch (e) {
+        // Сбой связи: ответ не засчитан, запуск прежний, «думает» снят.
+        if (get().interview === shown) set({ interview: run, interviewBusy: false, interviewNotice: messageOf(e) })
+        return
+      }
+      if (get().interview !== shown) return
+      const { run: heard, next } = step
+      set({ interview: heard })
 
       const candidateTurns = heard.transcript.filter(l => l.speaker === 'candidate').length
       const r = await dialogue.interview({
@@ -1847,13 +1859,23 @@ export function createGameStore(
       const run = st.interview
       const said = text.trim()
       if (!run || st.interviewBusy || !said || run.stage !== 'questions') return
-      const track = st.tracks.find(t => t.id === run.track)!
+      const track = trackOf(run.track)!
       const asked = askQuestion(run, said)
       set({ interview: asked, interviewBusy: true, interviewNotice: null })
 
+      // Заготовки ответов живут на сервере; без связи — нейтральный ответ.
+      let fallback = FAQ_FALLBACK
+      try {
+        const x = content.interviewFaq(track.id, said)
+        fallback = isThenable(x) ? await x : x
+      } catch {
+        // Модель или нейтральная реплика ответят и так.
+      }
+      if (get().interview !== asked) return
+
       const r = await dialogue.interview({
         purpose: 'answer', interviewer: track.interviewer, company: track.company,
-        question: null, said, history: run.transcript, fallback: faqReply(track, said),
+        question: null, said, history: run.transcript, fallback,
       })
       if (get().interview !== asked) return
       set({ interview: say(asked, r.text), interviewBusy: false, interviewNotice: r.notice ?? null })
@@ -1863,19 +1885,26 @@ export function createGameStore(
       const st = get()
       const run = st.interview
       if (!run || st.interviewBusy || run.stage !== 'questions') return null
-      const track = st.tracks.find(t => t.id === run.track)!
-      const at = clock.now().toISOString()
-      const record: InterviewRecord = {
-        id: `${track.id}:${at}`, track: track.id, at, attempt: run.attempt,
-        result: gradeInterview(track, finishQuestions(run)),
-      }
-      // Прогресс правится синхронно, хранилище получает его следом.
-      const progress = { ...st.progress, interviews: [...st.progress.interviews, record] }
-      set({ progress, interview: null, interviewOpen: record.id, activeTool: 'interview' })
-      void saveProgress(progress).catch(() => {
-        // Хранилище недоступно — запись живёт в памяти до перезагрузки.
+      set({ interviewBusy: true, interviewNotice: null })
+      // Разбор по пунктам считает сервер: пункты и образцовые ответы у него.
+      return settle(() => content.interviewGrade(finishQuestions(run)), result => {
+        const now = get()
+        if (now.interview !== run) return null
+        const at = clock.now().toISOString()
+        const record: InterviewRecord = {
+          id: `${run.track}:${at}`, track: run.track, at, attempt: run.attempt, result,
+        }
+        // Прогресс правится синхронно, хранилище получает его следом.
+        const progress = { ...now.progress, interviews: [...now.progress.interviews, record] }
+        set({ progress, interview: null, interviewBusy: false, interviewOpen: record.id, activeTool: 'interview' })
+        void saveProgress(progress).catch(() => {
+          // Хранилище недоступно — запись живёт в памяти до перезагрузки.
+        })
+        return record
+      }, e => {
+        if (get().interview === run) set({ interviewBusy: false, interviewNotice: messageOf(e) })
+        return null
       })
-      return record
     },
 
     abandonInterview() {
