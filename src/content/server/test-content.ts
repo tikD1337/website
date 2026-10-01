@@ -1,7 +1,7 @@
 import { createContentService } from './service'
 import { nodeSigner } from './sign'
 import { LIBRARY } from './library'
-import type { ContentPort } from '../port'
+import type { ContentService } from '../port'
 
 /**
  * Сервис контента для тестов — он же синхронный разъём.
@@ -13,7 +13,7 @@ import type { ContentPort } from '../port'
 export function testContent(
   over: Partial<typeof LIBRARY> = {},
   now: () => number = () => Date.parse('2026-10-01T09:00:00Z'),
-): ContentPort {
+): ContentService {
   const lib = { ...LIBRARY, ...over }
   return createContentService({
     ...lib,

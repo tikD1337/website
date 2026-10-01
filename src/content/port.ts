@@ -127,3 +127,13 @@ export interface ContentPort {
   interviewFaq(track: string, text: string): MaybePromise<string>
   interviewGrade(run: InterviewRun): MaybePromise<InterviewResult>
 }
+
+/**
+ * Тот же разъём, отвечающий сразу, — сервис контента.
+ *
+ * Тесты читают ответы без `await`, а стор, получив его, идёт синхронно:
+ * поэтому существующие тесты не знают о сети.
+ */
+export type ContentService = {
+  [K in keyof ContentPort]: (...a: Parameters<ContentPort[K]>) => Awaited<ReturnType<ContentPort[K]>>
+}

@@ -1,6 +1,6 @@
 import {
   ContentError, EXPIRED,
-  type Capsule, type Catalog, type ContentPort, type CourseOutline, type PublicCheck, type TrackMeta,
+  type Capsule, type Catalog, type ContentService, type CourseOutline, type PublicCheck, type TrackMeta,
 } from '../port'
 import { metaOf, type Scenario } from '../../core/scenario/types'
 import { validateScenarios } from '../../core/scenario/load'
@@ -72,7 +72,7 @@ const isStrings = (x: unknown): x is string[] => Array.isArray(x) && x.every(s =
  * может разойтись. Всё присланное снаружи (запуск интервью, ответы
  * квиза) проверяется как `unknown`: сервис — граница доверия.
  */
-export function createContentService(o: ContentServiceOptions): ContentPort {
+export function createContentService(o: ContentServiceOptions): ContentService {
   const { scenarios, courses, tracks, sign, now } = o
   // Опечатка в контенте падает при запуске сервера, а не на тикете через полчаса.
   validateScenarios(scenarios)
