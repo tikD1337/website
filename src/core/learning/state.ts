@@ -1,5 +1,5 @@
 import type { QuizGrade } from './answer'
-import type { Answer, Course, Learning, QuizResult } from './types'
+import type { Answer, CourseShape, Learning, QuizResult } from './types'
 
 /**
  * Статусы курса и запись прогресса.
@@ -44,7 +44,7 @@ export interface CourseState {
  * Первая секция открыта; следующая — после сданного квиза предыдущей.
  * В открытой секции уроки идут по порядку, квиз — после всех уроков.
  */
-export function courseState(course: Course, l: Learning): CourseState {
+export function courseState(course: CourseShape, l: Learning): CourseState {
   const answered = new Set(l.checks)
   const passedAt = (id: string) => l.quizzes.find(q => q.id === id)?.passedAt ?? null
 

@@ -1,4 +1,5 @@
 import { useGame } from '../store/useGame'
+import type { CourseOutline } from '../content/port'
 import { profileFor } from '../core/progress/profile'
 import { countersOf, pointsInWeek } from '../core/progress/counters'
 import { rankFor, weekKey } from '../core/progress/points'
@@ -222,8 +223,11 @@ export function ProfileView() {
  * «до курсов», потому что без повода они украшение. Дата — когда сдан
  * последний квиз курса; всё выводится из прогресса, а не хранится.
  */
+/** Пока каталог не пришёл с сервера, курсов нет. */
+const NO_COURSES: CourseOutline[] = []
+
 function LearningSection() {
-  const courses = useGame(s => s.courses)
+  const courses = useGame(s => s.catalog?.courses ?? NO_COURSES)
   const learning = useGame(s => s.progress.learning)
   const open = useGame(s => s.openLearn)
   const states = courses.map(c => ({ course: c, st: courseState(c, learning) }))

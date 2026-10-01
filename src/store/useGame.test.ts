@@ -595,6 +595,30 @@ describe('курсы', () => {
     expect(validateProgress(saved)).toEqual([])
   })
 
+  /*
+    Урок и квиз приходят с сервера по запросу (срез 8А). Закрытый урок
+    сервер отдал бы по адресу — прогресса он не знает, — поэтому правило
+    держит стор: закрытое не грузится.
+  */
+  it('урок грузится с сервера, только когда открыт; верный ответ запоминается с разбором', () => {
+    const [l1, l2] = process.lessons as [Lesson, Lesson]
+    s().loadLesson(course.id, process.id, l2.id)
+    s().loadQuiz(course.id, process.id)
+    expect(s().lessons, 'закрытый урок').toEqual({})
+    expect(s().quizzes, 'закрытый квиз').toEqual({})
+
+    s().loadLesson(course.id, process.id, l1.id)
+    const loaded = s().lessons['first-line/process/ownership']!
+    expect(loaded.body).toEqual(l1.body)
+    expect(loaded.checks.map(c => c.id)).toEqual(l1.checks.map(c => c.id))
+
+    const k = l1.checks[0]!
+    const r = s().answerCheck(course.id, process.id, l1.id, k.id, right(k))
+    const why = k.kind === 'choice' ? k.options.find(o => o.correct)!.why : k.why
+    expect(r).toEqual({ ok: true, correct: true, why })
+    expect(s().progress.learning.answers).toEqual({ 'first-line/process/ownership/first-step': { answer: right(k), why } })
+  })
+
   it('практика открывает тикет по правилам очереди', () => {
     // Блокировка в окне смены, ничего не взято — тикет берётся.
     expect(s().practice('identity-account-lockout')).toEqual({ status: 'opened' })

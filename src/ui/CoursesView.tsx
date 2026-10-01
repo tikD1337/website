@@ -1,6 +1,6 @@
 import { useGame } from '../store/useGame'
 import { courseState, quizPath, type CourseState } from '../core/learning/state'
-import type { Course } from '../core/learning/types'
+import type { CourseOutline } from '../content/port'
 import { LessonView } from './learn/LessonView'
 import { QuizView } from './learn/QuizView'
 
@@ -12,8 +12,11 @@ import { QuizView } from './learn/QuizView'
  * тот же урок. Закрытое показано словом, а не спрятано: граница
  * обозначается, а не прячется.
  */
+/** Пока каталог не пришёл с сервера, курсов нет — а не «неизвестно». */
+const NO_COURSES: CourseOutline[] = []
+
 export function CoursesView() {
-  const courses = useGame(s => s.courses)
+  const courses = useGame(s => s.catalog?.courses ?? NO_COURSES)
   const at = useGame(s => s.learnAt)
 
   const course = at ? courses.find(c => c.id === at.course) : undefined
@@ -29,7 +32,7 @@ export function CoursesView() {
 const progressLine = (st: CourseState) => `уроков ${st.lessonsDone} из ${st.lessonsTotal}, квизов ${st.quizzesPassed} из ${st.quizzesTotal}`
 
 function CourseList() {
-  const courses = useGame(s => s.courses)
+  const courses = useGame(s => s.catalog?.courses ?? NO_COURSES)
   const learning = useGame(s => s.progress.learning)
   const open = useGame(s => s.openLearn)
 
@@ -61,7 +64,7 @@ function CourseList() {
   )
 }
 
-function CourseOverview({ course }: { course: Course }) {
+function CourseOverview({ course }: { course: CourseOutline }) {
   const learning = useGame(s => s.progress.learning)
   const open = useGame(s => s.openLearn)
   const st = courseState(course, learning)

@@ -1,10 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useGame, type PracticeResult } from '../../store/useGame'
 import { checkPath, courseState } from '../../core/learning/state'
-import { rightAnswer } from '../../core/learning/answer'
-import type { Answer, Block, Check, Course, Lesson, Section } from '../../core/learning/types'
+import type { Answer, Block } from '../../core/learning/types'
+import type { CourseOutline, PublicCheck } from '../../content/port'
 import { VERDICT } from '../verdict'
 import { formatDateTime } from '../dates'
+
+export type OutlineSection = CourseOutline['sections'][number]
+export type OutlineLesson = OutlineSection['lessons'][number]
 
 /** Абзац курса: `код` в обратных кавычках — моноширинно. */
 export function Rich({ text }: { text: string }) {
@@ -28,7 +31,7 @@ function Blocks({ blocks }: { blocks: Block[] }) {
 
 /** Поле ответа: варианты — радиокнопками, текст — строкой ввода. */
 export function AnswerInput({ check, name, value, onChange, onSubmit }: {
-  check: Check
+  check: PublicCheck
   name: string
   value: Answer | undefined
   onChange: (a: Answer) => void
@@ -40,7 +43,7 @@ export function AnswerInput({ check, name, value, onChange, onSubmit }: {
         {check.options.map((o, i) => (
           <label key={i} className="option">
             <input type="radio" name={name} checked={value === i} onChange={() => onChange(i)} />
-            <span><Rich text={o.text} /></span>
+            <span><Rich text={o} /></span>
           </label>
         ))}
       </div>
@@ -61,41 +64,52 @@ export function AnswerInput({ check, name, value, onChange, onSubmit }: {
 }
 
 /** Данный ответ словами — чтобы разбор неверного было с чем сопоставить. */
-export function answerText(check: Check, a: Answer | undefined): string {
+export function answerText(check: PublicCheck, a: Answer | undefined): string {
   if (a === undefined || a === '') return 'нет ответа'
-  if (check.kind === 'choice') return typeof a === 'number' ? check.options[a]?.text ?? 'нет ответа' : 'нет ответа'
+  if (check.kind === 'choice') return typeof a === 'number' ? check.options[a] ?? 'нет ответа' : 'нет ответа'
   return String(a)
 }
 
 
 function CheckItem({ check, path, done, onAnswer }: {
-  check: Check
+  check: PublicCheck
   path: string
   done: boolean
-  onAnswer: (a: Answer) => { correct: boolean; why: string | null } | null
+  onAnswer: (a: Answer) => Promise<{ correct: boolean; why: string | null }>
 }) {
   const [answer, setAnswer] = useState<Answer | undefined>(undefined)
   const [result, setResult] = useState<{ correct: boolean; why: string | null } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const saved = useGame(s => s.progress.learning.answers?.[path])
 
-  const submit = () => {
-    if (answer === undefined || answer === '') return
-    setResult(onAnswer(answer))
+  const submit = async () => {
+    if (answer === undefined || answer === '' || busy) return
+    setBusy(true)
+    setResult(await onAnswer(answer))
+    setBusy(false)
   }
 
   /*
     Пройденная проверка показывает верный ответ и больше не спрашивает:
     урок остаётся конспектом. Найдено на снимке: после «Верно» варианты
     и «Проверить» оставались активными, будто вопрос ещё открыт.
+
+    Верный ответ — тот, что дал ученик, с разбором, пришедшим с сервера
+    (срез 8А): браузер ответов не знает. Ответ прошлого формата прогресса
+    не сохранён — тогда только «Отвечено верно».
   */
   if (done && (!result || result.correct)) {
-    const right = rightAnswer(check)
+    const given = result ? answer : saved?.answer
+    const why = result ? result.why : saved?.why ?? null
+    const label = result ? 'Верно' : 'Отвечено верно'
     return (
       <div className="check">
         <p className="prose check-prompt"><Rich text={check.prompt} /></p>
         <p className="check-verdict">
-          <b className="ok">{result ? 'Верно:' : 'Отвечено верно:'}</b> <Rich text={right.text} />
+          <b className="ok">{given === undefined ? `${label}.` : `${label}:`}</b>
+          {given !== undefined && <> <Rich text={answerText(check, given)} /></>}
         </p>
-        <p className="prose check-why"><Rich text={right.why} /></p>
+        {why && <p className="prose check-why"><Rich text={why} /></p>}
       </div>
     )
   }
@@ -108,11 +122,11 @@ function CheckItem({ check, path, done, onAnswer }: {
         name={path}
         value={answer}
         onChange={a => { setAnswer(a); setResult(null) }}
-        onSubmit={submit}
+        onSubmit={() => void submit()}
       />
       <div className="bar">
-        <button className="act" type="button" disabled={answer === undefined || answer === ''} onClick={submit}>
-          Проверить
+        <button className="act" type="button" disabled={answer === undefined || answer === '' || busy} onClick={() => void submit()}>
+          {busy ? 'Проверка…' : 'Проверить'}
         </button>
       </div>
       {result && (
@@ -176,16 +190,23 @@ function Practice({ scenarioId }: { scenarioId: string }) {
   )
 }
 
-export function LessonView({ course, section, lesson }: { course: Course; section: Section; lesson: Lesson }) {
+export function LessonView({ course, section, lesson }: { course: CourseOutline; section: OutlineSection; lesson: OutlineLesson }) {
   const learning = useGame(s => s.progress.learning)
   const answerCheck = useGame(s => s.answerCheck)
   const open = useGame(s => s.openLearn)
+  const loadLesson = useGame(s => s.loadLesson)
+  const content = useGame(s => s.lessons[`${course.id}/${section.id}/${lesson.id}`])
 
   const state = courseState(course, learning)
   const sectionState = state.sections.find(x => x.id === section.id)!
   const index = section.lessons.indexOf(lesson)
   const status = sectionState.lessons[index]!.status
   const next = section.lessons[index + 1]
+
+  // Текст урока приходит с сервера при открытии; закрытый не грузится.
+  useEffect(() => {
+    if (status !== 'locked') void loadLesson(course.id, section.id, lesson.id)
+  }, [course.id, section.id, lesson.id, status, loadLesson])
 
   return (
     <>
@@ -199,13 +220,15 @@ export function LessonView({ course, section, lesson }: { course: Course; sectio
 
       {status === 'locked' ? (
         <p className="prose">Урок откроется, когда будет пройден предыдущий.</p>
+      ) : !content ? (
+        <p className="sub">Загрузка урока…</p>
       ) : (
         <>
-          <Blocks blocks={lesson.body} />
+          <Blocks blocks={content.body} />
 
           <div className="section">
             <h2>Проверки</h2>
-            {lesson.checks.map(c => {
+            {content.checks.map(c => {
               const path = checkPath(course.id, section.id, lesson.id, c.id)
               return (
                 <CheckItem
@@ -213,8 +236,8 @@ export function LessonView({ course, section, lesson }: { course: Course; sectio
                   check={c}
                   path={path}
                   done={learning.checks.includes(path)}
-                  onAnswer={a => {
-                    const r = answerCheck(course.id, section.id, lesson.id, c.id, a)
+                  onAnswer={async a => {
+                    const r = await answerCheck(course.id, section.id, lesson.id, c.id, a)
                     return r.ok ? { correct: r.correct, why: r.why } : { correct: false, why: r.error }
                   }}
                 />

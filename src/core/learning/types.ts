@@ -56,6 +56,17 @@ export interface Section {
   quiz: Check[]
 }
 
+/**
+ * Каркас курса — всё, что нужно статусам: id секций, уроков и проверок.
+ *
+ * Его же несёт оглавление с сервера (срез 8А): браузер считает статусы,
+ * не зная ни текстов уроков, ни ответов.
+ */
+export interface CourseShape {
+  id: string
+  sections: Array<{ id: string; lessons: Array<{ id: string; checks: Array<{ id: string }> }> }>
+}
+
 export interface Course {
   id: string
   title: string

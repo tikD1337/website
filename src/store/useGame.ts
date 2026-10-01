@@ -9,12 +9,11 @@ import { STAGES } from '../core/logistics/types'
 import { draftFrom } from '../core/kb/draft'
 import { editArticle as editKb, setStatus as setKbStatus, type KbResult } from '../core/kb/edit'
 import { mergeKb } from '../core/kb/search'
-import { COURSES } from '../courses'
-import { checkAnswer, gradeQuiz, type QuizGrade } from '../core/learning/answer'
+import type { QuizGrade } from '../core/learning/answer'
 import {
   courseState, recordCheck, recordQuiz, mergeLearning, checkPath, quizPath,
 } from '../core/learning/state'
-import type { Answer, Course, Learning } from '../core/learning/types'
+import type { Answer, Learning } from '../core/learning/types'
 import { INTERVIEWS } from '../interviews'
 import {
   startInterview as beginInterview, answer as answerQuestion, say, askInterviewer as askQuestion,
@@ -28,7 +27,7 @@ import {
 } from '../core/tickets/generate'
 import {
   settle, chain, all, isThenable, messageOf,
-  type Capsule, type Catalog, type ContentPort, type MaybePromise,
+  type Capsule, type Catalog, type ContentPort, type LessonContent, type MaybePromise, type QuizContent,
 } from '../content/port'
 // Временно, до сетевого разъёма (задача 9): контент ещё едет в бандле.
 import { createContentService } from '../content/server/service'
@@ -307,13 +306,21 @@ export interface GameState {
   /** стереть прогресс: необратимо, живёт в настройках, а не в reset */
   wipeProgress(): void
 
-  /** библиотека курсов — проверена загрузчиком при создании стора */
-  courses: Course[]
+  /**
+   * Уроки и квизы с сервера (срез 8А), по адресу `курс/секция/урок` и
+   * `курс/секция`. Грузятся при открытии и живут до перезагрузки:
+   * содержание курса от смены не зависит.
+   */
+  lessons: Record<string, LessonContent>
+  quizzes: Record<string, QuizContent>
+  /** урок с сервера — только открытый: закрытый сервер отдал бы по адресу, правило держит стор */
+  loadLesson(course: string, section: string, lesson: string): MaybePromise<void>
+  loadQuiz(course: string, section: string): MaybePromise<void>
   /** где остановился ученик; переживает смену и переход к тикету */
   learnAt: LearnAt | null
   openLearn(at: LearnAt | null): void
-  answerCheck(course: string, section: string, lesson: string, check: string, answer: Answer): AnswerResult
-  submitQuiz(course: string, section: string, answers: Record<string, Answer>): QuizSubmit
+  answerCheck(course: string, section: string, lesson: string, check: string, answer: Answer): MaybePromise<AnswerResult>
+  submitQuiz(course: string, section: string, answers: Record<string, Answer>): MaybePromise<QuizSubmit>
   /**
    * Урок открывает свой тикет по правилам очереди: свой — открыть,
    * чужой в работе — отказ, в окне смены — взять, иначе — новая смена,
@@ -365,7 +372,6 @@ export function createGameStore(
   /** библиотека сценариев; подменяется в тестах, которым нужен свой сценарий */
   /** разъём контента: сервис в тестах, сеть в приложении (задача 9) */
   content: ContentPort = createContentService({ ...LIBRARY, sign: s => s, now: () => Date.now() }),
-  courses: Course[] = COURSES,
   tracks: InterviewTrack[] = INTERVIEWS,
 ): UseBoundStore<StoreApi<GameState>> {
   const registry = createRegistry()
@@ -669,11 +675,12 @@ export function createGameStore(
       })
     }
 
-    const findCourse = (id: string) => get().courses.find(c => c.id === id)
+    const findCourse = (id: string) => get().catalog?.courses.find(c => c.id === id)
 
     return {
     ...fresh(),
-    courses,
+    lessons: {},
+    quizzes: {},
     learnAt: null,
     tracks,
     interview: null,
@@ -1680,6 +1687,30 @@ export function createGameStore(
       set({ learnAt: at, activeTool: 'courses' })
     },
 
+    loadLesson(courseId, sectionId, lessonId) {
+      const path = `${courseId}/${sectionId}/${lessonId}`
+      const course = findCourse(courseId)
+      if (!course || get().lessons[path]) return
+      const status = courseState(course, get().progress.learning).sections
+        .find(x => x.id === sectionId)?.lessons.find(x => x.id === lessonId)?.status
+      if (!status || status === 'locked') return
+      return settle(() => content.lesson(courseId, sectionId, lessonId),
+        lesson => set({ lessons: { ...get().lessons, [path]: lesson } }),
+        // Урок не пришёл — экран урока так и скажет; повтор — повторное открытие.
+        () => undefined)
+    },
+
+    loadQuiz(courseId, sectionId) {
+      const path = `${courseId}/${sectionId}`
+      const course = findCourse(courseId)
+      if (!course || get().quizzes[path]) return
+      const status = courseState(course, get().progress.learning).sections.find(x => x.id === sectionId)?.quiz
+      if (!status || status === 'locked') return
+      return settle(() => content.quiz(courseId, sectionId),
+        quiz => set({ quizzes: { ...get().quizzes, [path]: quiz } }),
+        () => undefined)
+    },
+
     answerCheck(courseId, sectionId, lessonId, checkId, answer) {
       const course = findCourse(courseId)
       if (!course) return { ok: false, error: 'курс не найден' }
@@ -1689,17 +1720,19 @@ export function createGameStore(
       if (!section || !lesson || !check) return { ok: false, error: 'урок не найден' }
 
       // Правило живёт здесь, а не в кнопке: спрятанная кнопка защищает только от мыши.
-      const learning = get().progress.learning
-      const status = courseState(course, learning).sections
+      const status = courseState(course, get().progress.learning).sections
         .find(x => x.id === section.id)!.lessons.find(x => x.id === lesson.id)!.status
       if (status === 'locked') return { ok: false, error: 'урок закрыт' }
 
-      const verdict = checkAnswer(check, answer)
-      if (verdict.correct) {
-        const next = recordCheck(learning, checkPath(course.id, section.id, lesson.id, check.id))
-        if (next !== learning) commitLearning(next)
-      }
-      return { ok: true, ...verdict }
+      // Верен ли ответ, знает сервер; разбор приходит один раз и запоминается.
+      return settle(() => content.check(courseId, sectionId, lessonId, checkId, answer), (verdict): AnswerResult => {
+        if (verdict.correct) {
+          const learning = get().progress.learning
+          const path = checkPath(course.id, section.id, lesson.id, check.id)
+          commitLearning(recordCheck(learning, path, { answer, why: verdict.why }))
+        }
+        return { ok: true, ...verdict }
+      }, (e): AnswerResult => ({ ok: false, error: messageOf(e) }))
     },
 
     submitQuiz(courseId, sectionId, answers) {
@@ -1708,13 +1741,14 @@ export function createGameStore(
       const section = course.sections.find(x => x.id === sectionId)
       if (!section) return { ok: false, error: 'квиз не найден' }
 
-      const learning = get().progress.learning
-      const status = courseState(course, learning).sections.find(x => x.id === section.id)!.quiz
+      const status = courseState(course, get().progress.learning).sections.find(x => x.id === section.id)!.quiz
       if (status === 'locked') return { ok: false, error: 'квиз закрыт' }
 
-      const grade = gradeQuiz(section.quiz, answers)
-      commitLearning(recordQuiz(learning, quizPath(course.id, section.id), grade, clock.now().toISOString()))
-      return { ok: true, grade }
+      // Верные ответы сервер называет только сданному квизу.
+      return settle(() => content.submitQuiz(courseId, sectionId, answers), (grade): QuizSubmit => {
+        commitLearning(recordQuiz(get().progress.learning, quizPath(course.id, section.id), grade, clock.now().toISOString()))
+        return { ok: true, grade }
+      }, (e): QuizSubmit => ({ ok: false, error: messageOf(e) }))
     },
 
     practice(scenarioId, newShift = false) {
