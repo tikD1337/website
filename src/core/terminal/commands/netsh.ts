@@ -64,7 +64,7 @@ const notFound = (args: string[]): CommandResult => ({
 const fail = (line: string): CommandResult => ({ stdout: joinLines([line, '']), exitCode: 1 })
 const BAD_NAME = fail('The filename, directory name, or volume label syntax is incorrect.')
 const BAD_SYNTAX = fail('The syntax supplied for this command is not valid. Check help for the correct syntax.')
-const DONE: CommandResult = { stdout: '', exitCode: 0 }
+const done = (canonical: string): CommandResult => ({ stdout: '', exitCode: 0, canonical })
 
 /** Параметры по позиции и по имени (`name=`, `source=`, `address=`); имя сильнее позиции. */
 function params(args: string[], order: string[]): Record<string, string> {
@@ -93,7 +93,8 @@ function interfaceIp(args: string[], ctx: CommandContext): CommandResult | undef
   if (verb === 'show' && ['config', 'dns', 'dnsservers'].includes(object)) {
     const p = params(rest, ['name'])
     if (p.name !== undefined && p.name.toLowerCase() !== a.name.toLowerCase()) return BAD_NAME
-    return { stdout: showConfig(a, object === 'config'), exitCode: 0 }
+    const full = object === 'config'
+    return { stdout: showConfig(a, full), exitCode: 0, canonical: `netsh interface ip show ${full ? 'config' : 'dns'}` }
   }
   if (verb !== 'set' || !['dns', 'dnsservers', 'address'].includes(object)) return undefined
 
@@ -103,28 +104,29 @@ function interfaceIp(args: string[], ctx: CommandContext): CommandResult | undef
   if (p.name === undefined) return BAD_SYNTAX
   if (p.name.toLowerCase() !== a.name.toLowerCase()) return BAD_NAME
   const source = p.source?.toLowerCase()
+  const head = `netsh interface ip set ${object === 'address' ? 'address' : 'dns'} "${a.name}"`
 
   if (object !== 'address') {
     if (source === 'dhcp') {
       if (a.dnsSource !== 'dhcp') setDnsDhcp(world, device, session, clock)
-      return DONE
+      return done(`${head} dhcp`)
     }
     if (source !== 'static') return BAD_SYNTAX
     const none = p.address?.toLowerCase() === 'none'
     if (!none && !isIp(p.address)) return BAD_SYNTAX
     setDnsStatic(world, device, none ? [] : [p.address!], session, clock)
-    return DONE
+    return done(`${head} static ${none ? 'none' : p.address}`)
   }
 
   if (source === 'dhcp') {
     return setAddressDhcp(world, device, session, clock).alreadyInState
       ? fail('DHCP is already enabled on this interface.')
-      : DONE
+      : done(`${head} dhcp`)
   }
   const gateway = p.gateway === undefined || p.gateway.toLowerCase() === 'none' ? '' : p.gateway
   if (source !== 'static' || !isIp(p.address) || !isIp(p.mask) || (gateway && !isIp(gateway))) return BAD_SYNTAX
   setAddressStatic(world, device, p.address!, p.mask!, gateway, session, clock)
-  return DONE
+  return done([`${head} static`, p.address, p.mask, gateway].filter(Boolean).join(' '))
 }
 
 /** `interface show interface`: состояние — итоговый линк, с портом коммутатора. */

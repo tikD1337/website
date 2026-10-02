@@ -476,6 +476,64 @@ describe('переезд в чужой VLAN', () => {
   })
 })
 
+describe('DNS на списанном сервере', () => {
+  const at = '2026-10-02T09:10:00.000Z'
+  const nic = (s: S) => s().world.devices['AL-LPT-0821']!.adapters[0]!
+  const NOTE = 'Katarina Novak сообщила, что в браузере не открывается ни один сайт, пишет про DNS. '
+    + 'ping 8.8.8.8 отвечает — связность есть, а nslookup internal-portal.arcline.corp не получил '
+    + 'ответа от 10.20.14.9. ipconfig /flushdns, ipconfig /release и ipconfig /renew не помогли: '
+    + 'аренда новая, DNS прежний — эту версию исключила. netsh interface ip show dns показал, что '
+    + '10.20.14.9 вписан вручную, это списанный контроллер старого офиса. Вернула DNS из DHCP: '
+    + 'netsh interface ip set dns "Ethernet" dhcp, DNS стал 10.20.14.10 и 10.20.14.11. Проверено: '
+    + 'nslookup internal-portal.arcline.corp отвечает, заявительница подтвердила по телефону, что '
+    + 'сайты открываются. Причина — ручной DNS со времён переезда; проверить его у остальных, '
+    + 'кто переезжал из старого офиса.'
+  /* Развилка: очевидные шаги ничего не меняют — ручной DNS аренда не трогает. */
+  const diagnose = (s: S) => {
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    for (const c of ['ping 8.8.8.8', 'nslookup internal-portal.arcline.corp', 'ipconfig /flushdns',
+      'ipconfig /release', 'ipconfig /renew', 'nslookup internal-portal.arcline.corp']) s().runCommand(c)
+    expect(nic(s).dns).toEqual(['10.20.14.9'])
+    expect(printed(s).match(/Request to 10\.20\.14\.9 timed-out/g)).toHaveLength(2)
+    s().runCommand('netsh interface ip show dns')
+  }
+
+  it('образцовый проход: flushdns и renew не помогают, источник DNS в netsh, DNS из DHCP — full', () => {
+    const s = play('net-dns-stale-static', at)
+    diagnose(s)
+    expect(printed(s)).toContain('Statically Configured DNS Servers:    10.20.14.9')
+    s().runCommand('netsh interface ip set dns "Ethernet" dhcp')
+    s().runCommand('nslookup internal-portal.arcline.corp')
+    s().confirmWithUser()
+    const card = close(s, NOTE)
+
+    expect(unmet(s)).toEqual([])
+    expect(card.silentFaults).toEqual([])
+    expect(card.note.parts.filter(p => !p.earned).map(p => p.id)).toEqual([])
+    expect(card.verdict).toBe('full')
+    expect(nic(s)).toMatchObject({ dnsSource: 'dhcp', dns: ['10.20.14.10', '10.20.14.11'] })
+  })
+
+  /*
+    Ловушка: публичный DNS открывает сайты, и заявительница честно
+    подтверждает. Внутренние имена при этом не разрешаются — мина видна
+    только в разборе.
+  */
+  it('публичный DNS вручную — заявительница довольна, а это тихая поломка', () => {
+    const s = play('net-dns-stale-static', at)
+    diagnose(s)
+    s().runCommand('netsh interface ip set dns "Ethernet" static 8.8.8.8')
+    s().runCommand('nslookup internal-portal.arcline.corp')
+    expect(printed(s)).toContain("*** 8.8.8.8 can't find internal-portal.arcline.corp: Non-existent domain")
+    s().confirmWithUser()
+    expect(s().session.flags.userConfirmed).toBe(true)
+    const card = close(s, NOTE)
+    expect(card.silentFaults).toEqual([expect.stringContaining('вписан вручную')])
+    expect(card.verdict).toBe('fail')
+    expect(unmet(s)).toEqual(['obj-dns-dhcp'])
+  })
+})
+
 describe('пропавшая ретрансляция', () => {
   const at = '2026-09-10T08:40:00.000Z'
   const helpers = (s: S) => s().world.network.switches[1]!.vlanInterfaces.find(v => v.vlan === 20)!.helpers

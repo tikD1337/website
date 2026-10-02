@@ -134,6 +134,26 @@ describe('netsh interface ip — настройка', () => {
     }
   })
 
+  /*
+    Цели и заметка сверяются с журналом по строке команды. Запись у
+    netsh свободная, поэтому в журнал идёт и полная форма — как у
+    сокращений консоли коммутатора.
+  */
+  it('в журнале — полная форма команды в любой записи', () => {
+    run('netsh int ipv4 show dnsservers name=Ethernet')
+    run('netsh interface ipv4 show config')
+    run('netsh int ip set dnsservers name=Ethernet source=static address=8.8.8.8')
+    run('netsh interface ipv4 set dns name="Ethernet" source=dhcp')
+    run('netsh int ipv4 set address name=Ethernet source=static address=10.20.14.97 mask=255.255.255.0 gateway=10.20.14.1')
+    expect(ctx.session.commands.map(c => c.canonical)).toEqual([
+      'netsh interface ip show dns',
+      'netsh interface ip show config',
+      'netsh interface ip set dns "Ethernet" static 8.8.8.8',
+      'netsh interface ip set dns "Ethernet" dhcp',
+      'netsh interface ip set address "Ethernet" static 10.20.14.97 255.255.255.0 10.20.14.1',
+    ])
+  })
+
   it('отказы: чужое имя, DHCP уже включён, неполная команда — мир не тронут', () => {
     const before = structuredClone(adapter())
     const cases: Array<[string, string]> = [

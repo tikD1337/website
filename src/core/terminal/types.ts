@@ -18,6 +18,12 @@ export interface CommandContext {
 export interface CommandResult {
   stdout: string
   exitCode: number
+  /**
+   * Полная форма для журнала, когда у команды много записей
+   * (`netsh int ipv4 … name=Ethernet`): цели и заметка сверяются с ней.
+   * Наружу из реестра не выходит.
+   */
+  canonical?: string
 }
 
 export type CommandHandler = (args: string[], ctx: CommandContext) => CommandResult

@@ -40,8 +40,8 @@ export function createRegistry(): Registry {
             exitCode: 1,
           }
 
-      recordCommand(ctx.session, ctx.clock, ctx.device, line.trim(), result.exitCode)
-      return result
+      recordCommand(ctx.session, ctx.clock, ctx.device, line.trim(), result.exitCode, result.canonical)
+      return { stdout: result.stdout, exitCode: result.exitCode }
     },
   }
 }
