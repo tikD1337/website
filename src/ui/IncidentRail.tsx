@@ -1,8 +1,22 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useGame } from '../store/useGame'
 import { STATUS_LABELS } from '../core/tickets/types'
 import { withPlural } from './plural'
 import { networkObserved } from '../core/session/observed'
+import { linkOf } from '../core/network/link'
+import type { Adapter } from '../core/world/types'
+
+/**
+ * Сеть машины в карточке — то же, что показал ipconfig: без линка
+ * адреса нет, и карточка не должна рисовать его под номером тикета.
+ */
+export function railNetwork(adapter: Adapter, link: boolean): Array<[string, string]> {
+  if (!link) return [['Сеть', 'Media disconnected']]
+  return [
+    ['Адрес', adapter.ip], ['Маска', adapter.mask],
+    ['Шлюз', adapter.gateway || '—'], ['DNS', adapter.dns.join(', ') || '—'],
+  ]
+}
 
 /**
  * Значение, которое подсвечивается один раз, когда изменилось.
@@ -94,18 +108,12 @@ export function IncidentRail() {
           <dd className="data">{machine?.assetTag ?? '—'}</dd>
           <dt>Модель</dt>
           <dd>{machine ? `${machine.vendor} ${machine.model}` : '—'}</dd>
-          {netSeen && (
-            <>
-              <dt>Адрес</dt>
-              <Data value={adapter?.ip ?? '—'} />
-              <dt>Маска</dt>
-              <Data value={adapter?.mask ?? '—'} />
-              <dt>Шлюз</dt>
-              <Data value={adapter?.gateway || '—'} />
-              <dt>DNS</dt>
-              <Data value={adapter?.dns.join(', ') || '—'} />
-            </>
-          )}
+          {netSeen && adapter && railNetwork(adapter, linkOf(world, ticket.device)).map(([label, value]) => (
+            <Fragment key={label}>
+              <dt>{label}</dt>
+              <Data value={value} />
+            </Fragment>
+          ))}
         </dl>
         {!netSeen && (
           <p className="sub">Сетевые настройки ещё не смотрели.</p>

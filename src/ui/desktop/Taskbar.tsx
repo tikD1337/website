@@ -1,7 +1,7 @@
 import { useGame } from '../../store/useGame'
 import { APPS, type AppId } from '../../store/windows'
 import { PINNED, GLYPH } from './Desktop'
-import { linkOf } from '../../core/network/link'
+import { linkOf, internetOf } from '../../core/network/link'
 
 /**
  * Состояние сети глазами системного трея.
@@ -12,7 +12,7 @@ import { linkOf } from '../../core/network/link'
  * трей хранил своё состояние, он бы соврал.
  */
 export function networkState(
-  adapter: { linkUp: boolean; autoconfigured: boolean; gateway: string } | undefined,
+  adapter: { linkUp: boolean; autoconfigured: boolean; gateway: string; internet: boolean } | undefined,
 ): { label: string; tone: 'ok' | 'warn' | 'bad' } {
   if (!adapter || !adapter.linkUp) {
     return { label: 'Нет подключения', tone: 'bad' }
@@ -20,6 +20,7 @@ export function networkState(
   if (adapter.autoconfigured || adapter.gateway === '') {
     return { label: 'Без доступа к сети', tone: 'warn' }
   }
+  if (!adapter.internet) return { label: 'Без доступа к интернету', tone: 'warn' }
   return { label: 'Подключено', tone: 'ok' }
 }
 
@@ -40,7 +41,9 @@ export function Taskbar() {
 
   const ticket = queue.tickets.find(t => t.number === queue.assigned)
   const adapter = ticket ? world.devices[ticket.device]?.adapters[0] : undefined
-  const net = networkState(adapter && { ...adapter, linkUp: linkOf(world, ticket!.device) })
+  const net = networkState(adapter && {
+    ...adapter, linkUp: linkOf(world, ticket!.device), internet: internetOf(world, ticket!.device),
+  })
 
   const openIds = new Set(windows.windows.map(w => w.id))
   const buttons = [...PINNED, ...windows.windows.map(w => w.id).filter(

@@ -8,13 +8,15 @@ import { networkState } from './Taskbar'
  */
 describe('состояние сети в трее', () => {
   it('следует адаптеру: исправен, без доступа, нет линка, нет адаптера', () => {
-    expect(networkState({ linkUp: true, autoconfigured: false, gateway: '10.20.14.1' }))
+    expect(networkState({ linkUp: true, autoconfigured: false, gateway: '10.20.14.1', internet: true }))
       .toEqual({ label: 'Подключено', tone: 'ok' })
-    expect(networkState({ linkUp: true, autoconfigured: true, gateway: '' }))
+    expect(networkState({ linkUp: true, autoconfigured: true, gateway: '', internet: false }))
       .toEqual({ label: 'Без доступа к сети', tone: 'warn' })
-    expect(networkState({ linkUp: true, autoconfigured: false, gateway: '' }).tone).toBe('warn')
-    expect(networkState({ linkUp: false, autoconfigured: false, gateway: '10.20.14.1' }))
+    expect(networkState({ linkUp: true, autoconfigured: false, gateway: '', internet: false }).tone).toBe('warn')
+    expect(networkState({ linkUp: false, autoconfigured: false, gateway: '10.20.14.1', internet: false }))
       .toEqual({ label: 'Нет подключения', tone: 'bad' })
     expect(networkState(undefined).tone).toBe('bad')
+    expect(networkState({ linkUp: true, autoconfigured: false, gateway: '10.20.14.254', internet: false }))
+      .toEqual({ label: 'Без доступа к интернету', tone: 'warn' })
   })
 })

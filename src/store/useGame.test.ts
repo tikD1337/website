@@ -371,7 +371,7 @@ describe('серверная', () => {
     таким, каким его оставил техник. Иначе сломанная ретрансляция жила бы
     до конца смены и делала непроходимыми следующие сетевые тикеты.
   */
-  it('эскалация применяет починку второй линии после оценки', () => {
+  it('починка общей системы — после оценки, при любом коде закрытия', () => {
     const HELPERS = 'network.switches[hostname=CR-01].vlanInterfaces[vlan=20].helpers'
     const relay: Scenario = {
       ...apipaNoLease, id: 'relay', device: 'AL-LPT-0601', requester: 'd.mbeki',
@@ -401,6 +401,20 @@ describe('серверная', () => {
     s().setResolutionCode('escalate')
     s().resolveTicket()
     expect(s().world).toEqual(before)
+
+    /*
+      Общую систему чинит её владелец, как бы ни закрыли тикет. Найдено
+      визуальной проверкой среза 8Б: тикет ретрансляции отменили, поломка
+      осталась в мире, и DNS-тикет следом не смог продлить аренду — любой
+      сетевой тикет VLAN 20 до конца смены был непроходим.
+    */
+    for (const code of ['cancelled', 'solved'] as const) {
+      g = createGameStore(clockAt('2026-09-09T18:00:00.000Z'), undefined, 1, testContent({ scenarios: [relay] }))
+      s().claimTicket(firstNumber())
+      s().setResolutionCode(code)
+      s().resolveTicket()
+      expect(helpers(), code).toEqual(['10.20.10.5'])
+    }
   })
 })
 

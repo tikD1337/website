@@ -61,7 +61,7 @@ export function PortGrid({ world, sw, selected, onSelect }: {
         ))}
       </div>
       <p className="sub legend">
-        <span>● подключён</span><span>○ нет линка</span><span>× выключен</span>
+        <span>● подключён</span><span>○ нет линка</span><span>× выключен</span><span>⊘ отключён защитой</span>
       </p>
     </div>
   )

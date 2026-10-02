@@ -58,3 +58,15 @@ export function portStatus(
   if (device && !device.adapters[0]?.linkUp) return 'notconnect'
   return 'connected'
 }
+
+/**
+ * Интернет глазами Windows: линк, маршрут через шлюз сегмента и
+ * отвечающий DNS. Проверка подключения Windows начинается с имени,
+ * поэтому мёртвый DNS для неё — такое же «без интернета», как чужой шлюз.
+ */
+export function internetOf(world: WorldState, host: string): boolean {
+  const a = world.devices[host]?.adapters[0]
+  const seg = segmentOf(world, host)
+  if (!a || !seg || !linkOf(world, host) || a.autoconfigured || a.gateway !== seg.gateway) return false
+  return Boolean(world.network.dnsServers.find(d => d.ip === a.dns[0])?.reachable)
+}
