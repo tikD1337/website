@@ -6,9 +6,10 @@ import {
 } from './show'
 import {
   findSwitch, setAccessVlan, setPortAdmin, setDescription, setPortMode, saveConfig,
-  setHelper, changeSvi, type InfraResult,
+  setHelper, changeSvi, changePortSecurity, type InfraResult,
 } from '../infra/switchops'
-import { recordCommand } from '../session/session'
+import { portOf } from '../network/link'
+import { recordCommand, setFlag } from '../session/session'
 import type { CommandContext } from '../terminal/types'
 import type { NetSwitch } from '../world/types'
 
@@ -123,7 +124,12 @@ function parseShow(e: Env, privileged: boolean): Parsed {
       return show('ip interface brief', () => ipInterfaceBrief(ctx.world, sw))
     case 'logging':
       c.end()
-      return show('logging', () => logging(sw))
+      return show('logging', () => {
+        // Журнал коммутатора, где стоит машина из тикета, — расследование, как просмотр событий.
+        const incident = ctx.session.incident
+        if (incident && portOf(ctx.world, incident.device)?.sw === sw) setFlag(ctx.session, 'switchLogRead', true)
+        return logging(sw)
+      })
     case 'mac': {
       c.word([['address-table', 'MAC forwarding table']])
       const by = c.word([
@@ -314,6 +320,13 @@ const SVI_IF: Choice[] = [
   ['ip', 'Interface Internet Protocol config commands'] as const,
 ].sort(([a], [b]) => a.localeCompare(b))
 
+const PORT_SECURITY: Choice[] = [
+  ['aging', 'Port-security aging commands'],
+  ['mac-address', 'Secure mac address'],
+  ['maximum', 'Max secure addresses'],
+  ['violation', 'Security violation mode'],
+]
+
 const ifaceChoices = (s: CliState) => (s.iface!.startsWith('Vlan') ? SVI_IF : PORT_IF)
 const DESCRIPTION = ['LINE', 'Up to 200 characters describing this interface'] as const
 
@@ -322,6 +335,13 @@ function parsePort(e: Env, cmd: string): Parsed {
   const port = state.iface!
   const { world, session, clock } = ctx
   const op = (canonical: string, run: () => InfraResult): Parsed => ({ canonical, exec: () => applied(run()) })
+  /** Любая правка защиты порта — отказ шлюза; разбирается ровно настолько, чтобы назвать её. */
+  const portSecurity = (head: string): Parsed => {
+    const what = c.word(PORT_SECURITY, true)
+    const canonical = [head, what, what && !c.done ? c.rest('LINE', 'Port-security parameters') : null]
+      .filter(Boolean).join(' ')
+    return op(canonical, () => changePortSecurity(world, sw.hostname, port, 'изменение защиты порта', session, clock))
+  }
 
   switch (cmd) {
     case 'description': {
@@ -335,7 +355,12 @@ function parsePort(e: Env, cmd: string): Parsed {
       const what = c.word([
         ['description', 'Interface specific description'],
         ['shutdown', 'Shutdown the selected interface'],
+        ['switchport', 'Set switching mode characteristics'],
       ])
+      if (what === 'switchport') {
+        c.word([['port-security', 'Security related command']])
+        return portSecurity('no switchport port-security')
+      }
       c.end()
       return what === 'shutdown'
         ? op('no shutdown', () => setPortAdmin(world, sw.hostname, port, true, session, clock))
@@ -345,7 +370,9 @@ function parsePort(e: Env, cmd: string): Parsed {
       const sub = c.word([
         ['access', 'Set access mode characteristics of the interface'],
         ['mode', 'Set trunking mode of the interface'],
+        ['port-security', 'Security related command'],
       ])
+      if (sub === 'port-security') return portSecurity('switchport port-security')
       if (sub === 'mode') {
         const mode = c.word([
           ['access', 'Set trunking mode to ACCESS unconditionally'],

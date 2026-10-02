@@ -119,11 +119,24 @@ export function setPortAdmin(
 
   const denied = gate(sw, port, up ? 'включение порта' : 'выключение порта', world, session, clock)
   if (denied) return denied
+  // `no shutdown` на порту, отключённом защитой, ничего не меняет: снимает его только `shutdown`.
   if (port.adminUp === up) return { ok: true, alreadyInState: true }
 
   port.adminUp = up
   recordChange(session, clock, portPath(sw, port, 'adminUp'), !up, up, true)
   configured(sw, clock)
+  if (!up) port.errDisabled = null
+  if (up && port.intruder) {
+    // Чужое устройство всё ещё в розетке: защита снова отключает порт.
+    port.errDisabled = 'psecure-violation'
+    const at = clock.now().toISOString()
+    const short = port.name
+    sw.log.push(
+      { at, text: `%PM-4-ERR_DISABLE: psecure-violation error detected on ${short}, putting ${short} in err-disable state` },
+      { at, text: `%PORT_SECURITY-2-PSECURE_VIOLATION: Security violation occurred, caused by MAC address ${port.intruder} on port ${longName(port.name)}.` },
+    )
+    return { ok: true }
+  }
   sw.log.push({
     at: clock.now().toISOString(),
     text: `%LINK-3-UPDOWN: Interface ${longName(port.name)}, changed state to ${up ? 'up' : 'down'}`,
@@ -210,6 +223,23 @@ export function setPortMode(
  * создание нового. Это маршрутизация целого сегмента, общая для всех в
  * нём. Первой линии она не принадлежит: отказ всегда.
  */
+/**
+ * Защита порта — защитный контроль, как фаервол: первая линия её не
+ * ослабляет даже на своём порту. Операция есть и всегда отклоняется,
+ * чтобы отказ был виден и попал в разбор.
+ */
+export function changePortSecurity(
+  world: WorldState, swName: string, portName: string, description: string,
+  session: SessionLog, clock: Clock,
+): InfraResult {
+  const found = locate(world, swName, portName)
+  if ('error' in found) return fail(found.error)
+  const target = `${found.sw.hostname}/${found.port.name}`
+  const d = authorize({ kind: 'disable-security', target, description }, world, session)
+  addDangerousAction(session, clock, `${description}: ${target}`, d.reason)
+  return refuse(d.reason)
+}
+
 export function changeSvi(
   world: WorldState, swName: string, vlan: number, description: string,
   session: SessionLog, clock: Clock,

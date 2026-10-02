@@ -64,7 +64,7 @@ export function interfaceDetail(world: WorldState, sw: NetSwitch, port: SwitchPo
     ? `${longName(port.name)} is administratively down, line protocol is down (disabled)`
     : status === 'connected'
       ? `${longName(port.name)} is up, line protocol is up (connected)`
-      : `${longName(port.name)} is down, line protocol is down (notconnect)`
+      : `${longName(port.name)} is down, line protocol is down (${status})`
   const mac = ownMac(sw, sw.ports.indexOf(port) + 1)
   const up = status === 'connected'
   // Счётчики выводятся из номера порта: живой порт не может показывать нули.

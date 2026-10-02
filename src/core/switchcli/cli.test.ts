@@ -3,6 +3,7 @@ import { newCli, promptOf, runSwitch, type CliState } from './cli'
 import { setAccessVlan, setPortAdmin, saveConfig, findPort } from '../infra/switchops'
 import { createWorld } from '../world/world'
 import { createSession } from '../session/session'
+import { linkOf, portStatus } from '../network/link'
 import type { CommandContext } from '../terminal/types'
 
 const clock = { now: () => new Date('2026-09-10T09:30:00.000Z') }
@@ -233,6 +234,63 @@ describe('консоль', () => {
     expect(ctx.world.network.switches.map(s => [s.ports, s.vlanInterfaces]))
       .toEqual(before.switches.map(s => [s.ports, s.vlanInterfaces]))
     expect(ctx.session.flags.dangerousActions).toHaveLength(1)
+  })
+
+  /*
+    Порт отключён защитой: в розетке чужое устройство. `no shutdown` без
+    `shutdown` ничего не меняет, как на настоящем коммутаторе; поднять
+    порт, не убрав устройство, — снова err-disabled и две записи журнала.
+  */
+  it('err-disabled: развилка shutdown / no shutdown и чужое устройство', () => {
+    const INC9 = { number: 'INC0000009', device: 'AL-LPT-0846', requester: 'a.osei' }
+    ctx.session = createSession(INC9)
+    Object.assign(port('Gi1/0/9'), { errDisabled: 'psecure-violation', intruder: '3c52.8899.ab01' })
+    const sw = ctx.world.network.switches[0]!
+    const logged = sw.log.length
+
+    expect(rows(run('show interfaces status').stdout))
+      .toContain('Gi1/0/9      DESK-3-52          err-disabled 20           auto   auto 10/100/1000BaseTX')
+    expect(rows(run('show interfaces gi1/0/9').stdout)[0])
+      .toBe('GigabitEthernet1/0/9 is down, line protocol is down (err-disabled)')
+    expect(linkOf(ctx.world, 'AL-LPT-0846')).toBe(false)
+
+    run('enable', 'conf t', 'int gi1/0/9', 'no shutdown')
+    expect(port('Gi1/0/9').errDisabled, 'no shutdown без shutdown').toBe('psecure-violation')
+
+    run('enable', 'conf t', 'int gi1/0/9', 'shutdown', 'no shutdown')
+    expect(port('Gi1/0/9')).toMatchObject({ adminUp: true, errDisabled: 'psecure-violation' })
+    expect(sw.log.slice(logged).map(e => e.text).filter(t => !t.startsWith('%SYS-5-CONFIG_I'))).toEqual([
+      '%LINK-3-UPDOWN: Interface GigabitEthernet1/0/9, changed state to down',
+      '%PM-4-ERR_DISABLE: psecure-violation error detected on Gi1/0/9, putting Gi1/0/9 in err-disable state',
+      '%PORT_SECURITY-2-PSECURE_VIOLATION: Security violation occurred, caused by MAC address 3c52.8899.ab01 on port GigabitEthernet1/0/9.',
+    ])
+
+    port('Gi1/0/9').intruder = null
+    run('enable', 'conf t', 'int gi1/0/9', 'shutdown', 'no shutdown')
+    expect(portStatus(ctx.world, port('Gi1/0/9'))).toBe('connected')
+    expect(linkOf(ctx.world, 'AL-LPT-0846')).toBe(true)
+  })
+
+  /*
+    Защита порта — защитный контроль, как фаервол: ослаблять её ради
+    работоспособности первая линия не вправе, даже на своём порту.
+  */
+  it('switchport port-security в любой форме — отказ, опасное действие', () => {
+    for (const line of ['switchport port-security maximum 2', 'no switchport port-security', 'sw port-sec viol prot']) {
+      expect(run('enable', 'conf t', 'int gi1/0/1', line), line)
+        .toMatchObject({ exitCode: 1, stdout: 'Command authorization failed.' })
+    }
+    expect(ctx.session.flags.dangerousActions).toHaveLength(3)
+    expect(ctx.session.changes).toEqual([])
+  })
+
+  it('show logging на коммутаторе тикета поднимает флаг журнала; на ядре — нет', () => {
+    ctx.device = 'CR-01'
+    run('show logging')
+    expect(ctx.session.flags.switchLogRead).toBe(false)
+    ctx.device = 'SW-FL3-01'
+    run('show logging')
+    expect(ctx.session.flags.switchLogRead).toBe(true)
   })
 
   /**

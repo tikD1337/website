@@ -21,11 +21,11 @@ export function portOf(
   return undefined
 }
 
-/** Итоговый линк: кабель со стороны машины и включённый порт. */
+/** Итоговый линк: кабель со стороны машины и включённый порт, не отключённый защитой. */
 export function linkOf(world: WorldState, host: string): boolean {
   const adapter = world.devices[host]?.adapters[0]
   const p = portOf(world, host)
-  return Boolean(adapter?.linkUp && p?.port.adminUp)
+  return Boolean(adapter?.linkUp && p?.port.adminUp && !p.port.errDisabled)
 }
 
 /** VLAN машины — VLAN доступа её порта. */
@@ -48,8 +48,11 @@ export function segmentOf(world: WorldState, host: string): NetworkSegment | und
  * известная миру, отвечает за свой конец сама (`linkUp`); сервер или
  * соседний коммутатор без модели машины считаются подключёнными.
  */
-export function portStatus(world: WorldState, port: SwitchPort): 'connected' | 'notconnect' | 'disabled' {
+export function portStatus(
+  world: WorldState, port: SwitchPort,
+): 'connected' | 'notconnect' | 'disabled' | 'err-disabled' {
   if (!port.adminUp) return 'disabled'
+  if (port.errDisabled) return 'err-disabled'
   if (!port.connectedTo) return 'notconnect'
   const device = world.devices[port.connectedTo]
   if (device && !device.adapters[0]?.linkUp) return 'notconnect'

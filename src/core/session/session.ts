@@ -17,6 +17,7 @@ export function createSession(incident?: Incident): SessionLog {
       userConfirmed: false,
       announcedBeforeActing: false,
       eventLogRead: false,
+      switchLogRead: false,
       userInformed: false,
       dangerousActions: [],
     },

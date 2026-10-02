@@ -13,12 +13,14 @@ export const STATUS_WORD: Record<ReturnType<typeof portStatus>, string> = {
   connected: 'подключён',
   notconnect: 'нет линка',
   disabled: 'выключен',
+  'err-disabled': 'отключён защитой',
 }
 
 const SYMBOL: Record<ReturnType<typeof portStatus>, string> = {
   connected: '●',
   notconnect: '○',
   disabled: '×',
+  'err-disabled': '⊘',
 }
 
 const number = (p: SwitchPort) => p.name.split('/').at(-1)!
