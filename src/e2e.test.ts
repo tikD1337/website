@@ -587,6 +587,63 @@ describe('статический адрес с чужим шлюзом', () => {
   })
 })
 
+describe('порт отключён защитой', () => {
+  const at = '2026-10-02T11:30:00.000Z'
+  const SW = 'SW-FL3-01'
+  const port = (s: S) => s().world.network.switches[0]!.ports.find(p => p.name === 'Gi1/0/9')!
+  const NOTE = 'Ama Osei сообщила, что сети нет совсем, значок с крестиком, кабель вставлен. '
+    + 'ipconfig показал Media disconnected. По кабинету 3-52 нашла розетку DESK-3-52 — порт Gi1/0/9 '
+    + 'на SW-FL3-01; show interfaces status — err-disabled. show logging: psecure-violation, чужой MAC '
+    + '00e0.4c68.2a17 — в розетку включён мини-коммутатор. Попросила заявительницу отключить его, '
+    + 'затем shutdown и no shutdown на Gi1/0/9 — порт поднялся, ipconfig показал адрес 10.20.14.96. '
+    + 'Проверено: заявительница подтвердила по телефону, что сеть есть. Причина — личный '
+    + 'коммутатор в розетке стола; при повторении порт снова уйдёт в err-disabled.'
+  const diagnose = (s: S) => {
+    s().verifyRequester('manager', 'Elena Varga')
+    s().runCommand('ipconfig')
+    expect(printed(s)).toContain('Media disconnected')
+    return cli(s, SW, 'show interfaces status', 'show logging')
+  }
+
+  it('образцовый проход: журнал коммутатора, просьба убрать устройство, порт поднят — full', () => {
+    const s = play('net-port-security', at)
+    s().askRequesterTo('unplug-switch')
+    expect(s().session.askedFor, 'просьба закрыта до журнала коммутатора').toEqual([])
+    expect(diagnose(s)).toContain('caused by MAC address 00e0.4c68.2a17 on port GigabitEthernet1/0/9.')
+    s().askRequesterTo('unplug-switch')
+    cli(s, SW, 'enable', 'conf t', 'int gi1/0/9', 'shutdown', 'no shutdown', 'end')
+    s().runCommand('ipconfig')
+    s().confirmWithUser()
+    const card = close(s, NOTE)
+
+    expect(unmet(s)).toEqual([])
+    expect(card.silentFaults).toEqual([])
+    expect(card.note.parts.filter(p => !p.earned).map(p => p.id)).toEqual([])
+    expect(card.verdict).toBe('full')
+    expect(port(s)).toMatchObject({ errDisabled: null, intruder: null, adminUp: true })
+  })
+
+  /*
+    Развилка: передёрнуть порт, не убрав устройство, — порт снова
+    err-disabled, в журнале новое нарушение, заявительница без сети.
+    Защиту порта первая линия не ослабляет — отказ и опасное действие.
+  */
+  it('порт поднят без просьбы — снова err-disabled; правка защиты — отказ', () => {
+    const s = play('net-port-security', at)
+    diagnose(s)
+    const out = cli(s, SW, 'enable', 'conf t', 'int gi1/0/9', 'shutdown', 'no shutdown',
+      'switchport port-security maximum 2', 'end', 'show interfaces gi1/0/9')
+    expect(out).toContain('Command authorization failed.')
+    expect(out).toContain('GigabitEthernet1/0/9 is down, line protocol is down (err-disabled)')
+    expect(port(s).errDisabled).toBe('psecure-violation')
+    s().confirmWithUser()
+    expect(s().session.flags.userConfirmed).toBe(false)
+    const card = close(s, NOTE)
+    expect(card.verdict).toBe('fail')
+    expect(dim(s, 'authority').score).toBeLessThan(10)
+  })
+})
+
 describe('пропавшая ретрансляция', () => {
   const at = '2026-09-10T08:40:00.000Z'
   const helpers = (s: S) => s().world.network.switches[1]!.vlanInterfaces.find(v => v.vlan === 20)!.helpers

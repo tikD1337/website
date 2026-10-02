@@ -8,7 +8,7 @@ describe('треки интервью', () => {
   it('треки проходят загрузчик', () => {
     expect(() => validateInterviews(INTERVIEWS, SCENARIOS.map(s => s.id))).not.toThrow()
     const [track] = INTERVIEWS
-    expect([track!.technical.length, track!.experience.length, track!.faq.length, track!.perInterview]).toEqual([10, 11, 8, 5])
+    expect([track!.technical.length, track!.experience.length, track!.faq.length, track!.perInterview]).toEqual([10, 12, 8, 5])
     // Вопрос об опыте есть по каждому сценарию библиотеки.
     expect(track!.experience.filter(q => q.scenario).map(q => q.scenario).sort()).toEqual(SCENARIOS.map(s => s.id).sort())
   })

@@ -8,6 +8,7 @@ import { hwDockFailed } from './hw-dock-failed'
 import { hwHeadsetWorn } from './hw-headset-worn'
 import { dnsStaleStatic } from './net-dns-stale-static'
 import { staticWrongGateway } from './net-static-wrong-gateway'
+import { portSecurity } from './net-port-security'
 import type { Scenario } from '../core/scenario/types'
 
 /**
@@ -27,6 +28,7 @@ export const SCENARIOS: Scenario[] = [
   hwHeadsetWorn,
   dnsStaleStatic,
   staticWrongGateway,
+  portSecurity,
 ]
 
 export function scenarioFor(id: string): Scenario {
