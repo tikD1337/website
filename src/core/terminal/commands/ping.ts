@@ -43,6 +43,27 @@ export const ping: CommandHandler = (args, ctx) => {
   const reachable = hasRoute(ctx) && known
   const head = [`Pinging ${target} with 32 bytes of data:`]
 
+  /*
+    Шлюз адаптера не тот, что у сегмента: ARP на него не находит
+    никого, и отвечает сама машина. Windows считает такие ответы
+    полученными — «Lost = 0», но без строки времён.
+  */
+  const a = ctx.world.devices[ctx.device]?.adapters[0]
+  const gateway = segmentOf(ctx.world, ctx.device)?.gateway
+  if (reachable && !isLocalSubnet(ctx, target) && a && a.gateway !== gateway) {
+    return {
+      stdout: joinLines([
+        ...head,
+        ...Array<string>(4).fill(`Reply from ${a.ip}: Destination host unreachable.`),
+        '',
+        `Ping statistics for ${target}:`,
+        '    Packets: Sent = 4, Received = 4, Lost = 0 (0% loss),',
+        '',
+      ]),
+      exitCode: 1,
+    }
+  }
+
   if (!reachable) {
     return {
       stdout: joinLines([

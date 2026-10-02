@@ -74,6 +74,29 @@ describe('ping', () => {
     applyInject(ctx.world, [{ path: 'devices.AL-LPT-0447.adapters[0].linkUp', value: false }])
     expect(reachable('8.8.8.8')).toBe(false)
   })
+
+  /*
+    Статический адрес со шлюзом, которого в сегменте нет: машина сама
+    отвечает «недостижимо» — ARP на шлюз не находит никого. Соседи по
+    подсети при этом отвечают: «у коллег работает, папка открывается».
+  */
+  it('чужой шлюз: внешние адреса — «Destination host unreachable» от себя, своя подсеть отвечает', () => {
+    applyInject(ctx.world, [{ path: 'devices.AL-LPT-0447.adapters[0].gateway', value: '10.20.14.254' }])
+    expect(ping(['8.8.8.8'], ctx)).toEqual({
+      exitCode: 1,
+      stdout: out(
+        'Pinging 8.8.8.8 with 32 bytes of data:',
+        'Reply from 10.20.14.88: Destination host unreachable.',
+        'Reply from 10.20.14.88: Destination host unreachable.',
+        'Reply from 10.20.14.88: Destination host unreachable.',
+        'Reply from 10.20.14.88: Destination host unreachable.',
+        '',
+        'Ping statistics for 8.8.8.8:',
+        '    Packets: Sent = 4, Received = 4, Lost = 0 (0% loss),',
+      ),
+    })
+    expect(ping(['10.20.14.1'], ctx).exitCode).toBe(0)
+  })
 })
 
 describe('nslookup', () => {
