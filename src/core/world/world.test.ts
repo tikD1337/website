@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createWorld, applyInject } from './world'
+import { linkOf, portOf, segmentOf } from '../network/link'
 
 describe('стартовый мир', () => {
   it('сеть исправна и связна: адреса, сегменты, владельцы, внутренняя зона', () => {
@@ -92,6 +93,34 @@ describe('стартовая сеть', () => {
     const dhcp = w.network.servers.find(s => s.hostname === 'DHCP01')!
     expect(core.vlanInterfaces.find(v => v.vlan === 20)!.helpers).toEqual([dhcp.ip])
     expect(w.network.segments.find(s => s.vlanId === 20)!.dhcpServer).toBe(dhcp.ip)
+  })
+
+  /*
+    Сетевой пакет (8Б): три машины со своими людьми и розетками, чтобы
+    сценарии не делили машину с имеющимися. Пул шире машин — иначе
+    статический адрес из пула негде было бы взять; списанный контроллер
+    есть в мире, но не отвечает.
+  */
+  it('машины сетевого пакета — в VLAN 20 на своих розетках; пул до .99; списанный DNS молчит', () => {
+    const w = createWorld()
+    const cases: Array<[string, string, string, string]> = [
+      ['AL-LPT-0821', 'k.novak', 'Gi1/0/7', 'DESK-2-14'],
+      ['AL-LPT-0833', 'r.alvarez', 'Gi1/0/8', 'DESK-4-07'],
+      ['AL-LPT-0846', 'a.osei', 'Gi1/0/9', 'DESK-3-52'],
+    ]
+    for (const [host, sam, port, desk] of cases) {
+      expect(linkOf(w, host), host).toBe(true)
+      expect(segmentOf(w, host)?.vlanId, host).toBe(20)
+      expect(portOf(w, host)?.port, host).toMatchObject({ name: port, description: desk })
+      expect(w.devices[host]!.assignedTo, host).toBe(sam)
+      expect(w.org.users.find(u => u.samAccountName === sam)?.office, host).toBe(desk.slice(5))
+    }
+    expect(w.network.segments.find(s => s.vlanId === 20)!.leasePool.at(-1)).toBe('10.20.14.99')
+    expect(w.network.dnsServers.find(d => d.ip === '10.20.14.9')?.reachable).toBe(false)
+    for (const d of Object.values(w.devices)) expect(d.adapters[0]!.dnsSource, d.hostname).toBe('dhcp')
+    for (const p of w.network.switches.flatMap(sw => sw.ports)) {
+      expect([p.errDisabled, p.intruder], p.name).toEqual([null, null])
+    }
   })
 })
 

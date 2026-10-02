@@ -38,8 +38,8 @@ describe('вывод show', () => {
       'Port         Name               Status       Vlan       Duplex  Speed Type',
       'Gi1/0/1      DESK-3-14          connected    20         a-full a-1000 10/100/1000BaseTX',
     ])
-    expect(r).toContain('Gi1/0/7      DESK-3-07          disabled     20           auto   auto 10/100/1000BaseTX')
-    expect(r).toContain('Gi1/0/8      DESK-3-08          notconnect   20           auto   auto 10/100/1000BaseTX')
+    expect(r).toContain('Gi1/0/7      DESK-2-14          disabled     20           auto   auto 10/100/1000BaseTX')
+    expect(r).toContain('Gi1/0/10     DESK-3-10          notconnect   20           auto   auto 10/100/1000BaseTX')
     expect(r).toContain('Gi1/0/40     PRN-FL3-01         connected    40         a-full a-1000 10/100/1000BaseTX')
     expect(r).toContain('Gi1/0/48     UPLINK-CR-01       connected    trunk      a-full a-1000 10/100/1000BaseTX')
     expect(r.filter(l => l.startsWith('Gi1/0/'))).toHaveLength(48)
@@ -74,9 +74,9 @@ describe('вывод show', () => {
       .toBe(table('  20    a483.e72c.9144    DYNAMIC     Gi1/0/1'))
     expect(run('show mac address-table address A4-83-E7-2C-91-44').stdout)
       .toBe(table('  20    a483.e72c.9144    DYNAMIC     Gi1/0/1'))
-    expect(run('show mac address-table interface gi1/0/8').stdout).toBe(table())
-    // Шесть машин и принтер; незанятые розетки в таблице не видны.
-    expect(rows(run('show mac address-table').stdout).filter(l => l.includes('DYNAMIC'))).toHaveLength(7)
+    expect(run('show mac address-table interface gi1/0/10').stdout).toBe(table())
+    // Девять машин и принтер; незанятые розетки в таблице не видны.
+    expect(rows(run('show mac address-table').stdout).filter(l => l.includes('DYNAMIC'))).toHaveLength(10)
   })
 
   it('show running-config interface — порт и интерфейс VLAN', () => {

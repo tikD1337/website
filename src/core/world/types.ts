@@ -31,6 +31,14 @@ export interface Adapter {
   /** пустая строка — шлюза нет */
   gateway: string
   dns: string[]
+  /**
+   * Откуда DNS: из аренды или вписан вручную.
+   *
+   * В Windows адрес бывает по DHCP, а DNS — ручным, и тогда продление
+   * аренды DNS не трогает. `ipconfig /all` источник не показывает,
+   * `netsh interface ip show dns` — показывает: это и есть диагностика.
+   */
+  dnsSource: 'dhcp' | 'static'
   /** ISO-строка либо null, когда аренды нет */
   leaseObtained: string | null
   leaseExpires: string | null
@@ -159,6 +167,16 @@ export interface SwitchPort {
   accessVlan: number
   /** shutdown / no shutdown */
   adminUp: boolean
+  /**
+   * Порт выключен защитой. Снимается только `shutdown` и `no shutdown`;
+   * в стартовую конфигурацию не входит — это состояние, а не настройка.
+   */
+  errDisabled: 'psecure-violation' | null
+  /**
+   * MAC чужого устройства в розетке (мини-коммутатор под столом).
+   * Пока оно там, поднятый порт снова уходит в err-disabled.
+   */
+  intruder: string | null
   /** стартовая конфигурация; `write memory` копирует в неё текущую */
   saved: PortConfig
 }

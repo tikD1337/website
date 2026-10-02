@@ -41,6 +41,8 @@ function port(
     mode,
     accessVlan,
     adminUp: true,
+    errDisabled: null,
+    intruder: null,
     saved: { accessVlan, adminUp: true, description },
   }
 }
@@ -62,6 +64,9 @@ function accessPorts(): SwitchPort[] {
     4: ['DESK-2-11', 'AL-LPT-0714', 20],
     5: ['DESK-2-08', 'AL-DSK-0192', 20],
     6: ['DESK-3-06', 'AL-LPT-0788', 20],
+    7: ['DESK-2-14', 'AL-LPT-0821', 20],
+    8: ['DESK-4-07', 'AL-LPT-0833', 20],
+    9: ['DESK-3-52', 'AL-LPT-0846', 20],
     40: ['PRN-FL3-01', 'PRN-FL3-01', 40],
   }
   const ports: SwitchPort[] = []
@@ -113,6 +118,7 @@ export function seedNetwork(devices: Record<string, Device>) {
       leasePool: [
         '10.20.14.88', '10.20.14.89', '10.20.14.90', '10.20.14.91',
         '10.20.14.92', '10.20.14.93', '10.20.14.94', '10.20.14.95',
+        '10.20.14.96', '10.20.14.97', '10.20.14.98', '10.20.14.99',
       ],
       leases,
       dns: ['10.20.14.10', '10.20.14.11'],

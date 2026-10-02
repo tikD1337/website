@@ -35,10 +35,10 @@ describe('дерево и содержимое подразделений', () =
   it('показывает только то, что лежит непосредственно в подразделении', () => {
     const world = createWorld()
     expect(objectsIn(world, 'OU=Sales,OU=Employees,OU=Corp').map(o => [o.kind, o.name]))
-      .toEqual([['user', 'Elena Varga'], ['user', 'Priya Raman']])
+      .toEqual([['user', 'Ama Osei'], ['user', 'Elena Varga'], ['user', 'Priya Raman']])
     expect(objectsIn(world, 'OU=Employees,OU=Corp')).toEqual([])
     expect(objectsIn(world, 'OU=Finance,OU=Employees,OU=Corp')[0]!.subtitle)
-      .toBe('финансовый аналитик')
+      .toBe('бухгалтер')
     expect(objectsIn(world, 'OU=Security-Groups,OU=Groups,OU=Corp')
       .find(o => o.name === 'GRP-All-Staff')).toMatchObject({
       kind: 'group', subtitle: 'Доступ к общим документам',

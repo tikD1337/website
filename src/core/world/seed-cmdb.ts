@@ -41,6 +41,9 @@ const PURCHASED: Record<string, string> = {
   'AL-LPT-0714': '2026-09-01',
   'AL-DSK-0192': '2023-02-01',
   'AL-LPT-0788': '2025-01-15',
+  'AL-LPT-0821': '2025-08-18',
+  'AL-LPT-0833': '2024-10-07',
+  'AL-LPT-0846': '2025-04-22',
 }
 
 const DOCKS: Record<string, string> = {
@@ -54,6 +57,7 @@ const DOCKS: Record<string, string> = {
 const MONITORS: Array<[string, string]> = [
   ['AL-LPT-0447', 'AL-P2101'], ['AL-LPT-0512', 'AL-P2102'], ['AL-LPT-0601', 'AL-P2103'],
   ['AL-LPT-0714', 'AL-P2104'], ['AL-DSK-0192', 'AL-P2105'], ['AL-LPT-0788', 'AL-P2106'],
+  ['AL-LPT-0821', 'AL-P2107'], ['AL-LPT-0833', 'AL-P2108'], ['AL-LPT-0846', 'AL-P2109'],
 ]
 
 export function seedCmdb(

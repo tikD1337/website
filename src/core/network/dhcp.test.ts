@@ -52,9 +52,9 @@ describe('DHCP', () => {
     delete leases['F4-39-09-5B-7E-22']
     leases['0C-11-22-33-44-55'] = '10.20.14.93'
     release(w, 'AL-LPT-0788')
-    expect(acquireLease(w, 'AL-LPT-0788', clock)).toEqual({ ok: true, ip: '10.20.14.94' })
+    expect(acquireLease(w, 'AL-LPT-0788', clock)).toEqual({ ok: true, ip: '10.20.14.97' })
     expect(adapter(w, 'AL-LPT-0788')).toMatchObject({
-      ip: '10.20.14.94', mask: '255.255.255.0', gateway: '10.20.14.1',
+      ip: '10.20.14.97', mask: '255.255.255.0', gateway: '10.20.14.1',
       dns: ['10.20.14.10', '10.20.14.11'], autoconfigured: false,
       leaseObtained: '2026-09-10T08:00:00.000Z', leaseExpires: '2026-09-11T08:00:00.000Z',
     })

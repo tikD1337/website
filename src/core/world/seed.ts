@@ -233,6 +233,7 @@ function ethernet(mac: string, ip: string): Adapter {
     mask: '255.255.255.0',
     gateway: '10.20.14.1',
     dns: ['10.20.14.10', '10.20.14.11'],
+    dnsSource: 'dhcp',
     leaseObtained: '2026-09-09T09:00:00.000Z',
     leaseExpires: '2026-09-10T09:00:00.000Z',
     linkUp: true,
@@ -324,6 +325,48 @@ function seedDevices(): Record<string, Device> {
       drivers: baseDrivers('Kestrel'),
       disks: baseDisks(476, 402),
     },
+
+    'AL-LPT-0821': {
+      hostname: 'AL-LPT-0821',
+      assetTag: 'AL-L0821',
+      vendor: 'Torvald',
+      model: 'WorkLine T14 Gen 5',
+      assignedTo: 'k.novak',
+      adapters: [ethernet('3C-52-82-11-6A-0E', '10.20.14.94')],
+      services: baseServices(),
+      processes: baseProcesses(),
+      eventLog: baseEventLog(),
+      drivers: baseDrivers('Torvald'),
+      disks: baseDisks(476, 257),
+    },
+
+    'AL-LPT-0833': {
+      hostname: 'AL-LPT-0833',
+      assetTag: 'AL-L0833',
+      vendor: 'Kestrel',
+      model: 'Meridian 5450',
+      assignedTo: 'r.alvarez',
+      adapters: [ethernet('58-11-22-9B-C4-71', '10.20.14.95')],
+      services: baseServices(),
+      processes: baseProcesses(),
+      eventLog: baseEventLog(),
+      drivers: baseDrivers('Kestrel'),
+      disks: baseDisks(476, 344),
+    },
+
+    'AL-LPT-0846': {
+      hostname: 'AL-LPT-0846',
+      assetTag: 'AL-L0846',
+      vendor: 'Novatek',
+      model: 'Corvus 14',
+      assignedTo: 'a.osei',
+      adapters: [ethernet('7C-D3-0A-44-E8-15', '10.20.14.96')],
+      services: baseServices(),
+      processes: baseProcesses(),
+      eventLog: baseEventLog(),
+      drivers: baseDrivers('Novatek'),
+      disks: baseDisks(476, 198),
+    },
   }
 }
 
@@ -356,6 +399,9 @@ export function seedWorld(): WorldState {
           },
         },
         { ip: '10.20.14.11', reachable: true, zones: {} },
+        // Контроллер старого офиса: выведен из работы, адрес остался в
+        // ручных настройках у тех, кто переезжал с ноутбуком.
+        { ip: '10.20.14.9', reachable: false, zones: {} },
       ],
 
       publicHosts: ['8.8.8.8', '1.1.1.1'],
