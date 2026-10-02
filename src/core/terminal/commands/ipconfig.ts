@@ -109,16 +109,27 @@ function renderBrief(ctx: CommandContext): string {
   return joinLines(lines)
 }
 
+/** Адаптер без DHCP: ни освобождать, ни продлевать нечего. */
+const NOT_PERMISSIBLE: CommandResult = {
+  stdout: joinLines([
+    'Windows IP Configuration', '',
+    'The operation failed as no adapter is in the state permissible for',
+    'this operation.', '',
+  ]),
+  exitCode: 1,
+}
+
 function doRelease(ctx: CommandContext): CommandResult {
   const a = adaptersOf(ctx)[0]
   if (!a) return { stdout: joinLines(header('Ethernet')), exitCode: 1 }
+  if (!a.dhcpEnabled) return NOT_PERMISSIBLE
 
   const before = a.ip
 
   a.ip = '0.0.0.0'
   a.mask = '0.0.0.0'
   a.gateway = ''
-  a.dns = []
+  if (a.dnsSource === 'dhcp') a.dns = []
   a.autoconfigured = false
   a.leaseObtained = null
   a.leaseExpires = null
@@ -135,6 +146,7 @@ function doRelease(ctx: CommandContext): CommandResult {
 function doRenew(ctx: CommandContext): CommandResult {
   const a = adaptersOf(ctx)[0]
   if (!a) return { stdout: joinLines(header('Ethernet')), exitCode: 1 }
+  if (!a.dhcpEnabled) return NOT_PERMISSIBLE
 
   /**
    * Предусловие, ради которого всё и затевалось.

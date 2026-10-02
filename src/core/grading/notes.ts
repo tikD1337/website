@@ -24,9 +24,10 @@ function changedValues(session: SessionLog): string[] {
   const out: string[] = []
 
   for (const c of session.changes) {
-    // Значения: адреса, состояния служб, типы запуска.
+    // Значения: адреса, состояния служб, типы запуска; список DNS — по адресу.
     for (const v of [c.before, c.after]) {
-      if (typeof v === 'string' && v.length >= 3) out.push(v.toLowerCase())
+      if (typeof v !== 'string') continue
+      for (const x of v.split(', ')) if (x.length >= 3) out.push(x.toLowerCase())
     }
 
     /*
@@ -39,7 +40,7 @@ function changedValues(session: SessionLog): string[] {
     */
     const parts = c.path.replace(/\[[^\]]*\]/g, '').split('.')
     for (const p of parts.slice(2)) {
-      if (p.length >= 3 && !['services', 'adapters', 'status'].includes(p)) {
+      if (p.length >= 3 && !['services', 'adapters', 'status', 'dns'].includes(p)) {
         out.push(p.toLowerCase())
       }
     }

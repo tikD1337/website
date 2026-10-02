@@ -56,7 +56,8 @@ export function acquireLease(
     ip,
     mask: '255.255.255.0',
     gateway: seg.gateway,
-    dns: [...seg.dns],
+    // Ручной DNS аренда не трогает — так и остаётся списанный сервер.
+    dns: a.dnsSource === 'static' ? a.dns : [...seg.dns],
     autoconfigured: false,
     leaseObtained: now.toISOString(),
     leaseExpires: new Date(now.getTime() + 24 * 3600 * 1000).toISOString(),
@@ -74,7 +75,7 @@ export function autoconfigure(world: WorldState, host: string): void {
     ip: `169.254.${octet(bytes[4]!)}.${octet(bytes[5]!)}`,
     mask: '255.255.0.0',
     gateway: '',
-    dns: [],
+    dns: a.dnsSource === 'static' ? a.dns : [],
     autoconfigured: true,
     leaseObtained: null,
     leaseExpires: null,
