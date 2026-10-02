@@ -534,6 +534,59 @@ describe('DNS на списанном сервере', () => {
   })
 })
 
+describe('статический адрес с чужим шлюзом', () => {
+  const at = '2026-10-02T10:05:00.000Z'
+  const nic = (s: S) => s().world.devices['AL-LPT-0833']!.adapters[0]!
+  const NOTE = 'Rafael Alvarez сообщил, что со вчерашнего дня не открываются внешние сайты, а портал '
+    + 'и общая папка работают. ipconfig /renew завершился ошибкой — DHCP на адаптере выключен. '
+    + 'ping 8.8.8.8 — Destination host unreachable от самой машины, а ping 10.20.14.1 отвечает: '
+    + 'шлюз сегмента жив, кабель и порт исключены. netsh interface ip show config показал адрес '
+    + '10.20.14.97, заданный вручную, со шлюзом 10.20.14.254, которого в сети нет. Вернул адаптер '
+    + 'на DHCP: netsh interface ip set address "Ethernet" dhcp, машина получила 10.20.14.95 со '
+    + 'шлюзом 10.20.14.1. Проверено: ping 8.8.8.8 отвечает, заявитель подтвердил по телефону, что '
+    + 'сайты открываются. Причина — ручная настройка при установке сканера.'
+  /* Развилка: renew на статическом адаптере невозможен, а ping показывает, где обрыв. */
+  const diagnose = (s: S) => {
+    s().verifyRequester('manager', 'Dumisani Mbeki')
+    for (const c of ['ipconfig /all', 'ipconfig /renew', 'ping 8.8.8.8', 'ping 10.20.14.1',
+      'netsh interface ip show config']) s().runCommand(c)
+    expect(printed(s)).toContain('The operation failed as no adapter is in the state permissible for')
+    expect(printed(s)).toContain('Reply from 10.20.14.97: Destination host unreachable.')
+    expect(printed(s)).toContain('Default Gateway:                      10.20.14.254')
+  }
+
+  it('образцовый проход: renew невозможен, ping до шлюза, адрес по DHCP — full', () => {
+    const s = play('net-static-wrong-gateway', at)
+    diagnose(s)
+    s().runCommand('netsh interface ip set address "Ethernet" dhcp')
+    s().runCommand('ping 8.8.8.8')
+    s().confirmWithUser()
+    const card = close(s, NOTE)
+
+    expect(unmet(s)).toEqual([])
+    expect(card.silentFaults).toEqual([])
+    expect(card.note.parts.filter(p => !p.earned).map(p => p.id)).toEqual([])
+    expect(card.verdict).toBe('full')
+    expect(nic(s)).toMatchObject({ dhcpEnabled: true, ip: '10.20.14.95', gateway: '10.20.14.1' })
+  })
+
+  /*
+    Ловушка: поправить один шлюз. Интернет появляется, заявитель
+    подтверждает, а адрес из пула DHCP остаётся закреплён вручную.
+  */
+  it('исправлен только шлюз — заявитель доволен, а это тихая поломка', () => {
+    const s = play('net-static-wrong-gateway', at)
+    diagnose(s)
+    s().runCommand('netsh interface ip set address "Ethernet" static 10.20.14.97 255.255.255.0 10.20.14.1')
+    s().confirmWithUser()
+    expect(s().session.flags.userConfirmed).toBe(true)
+    const card = close(s, NOTE)
+    expect(card.silentFaults).toEqual([expect.stringContaining('отключён DHCP')])
+    expect(card.verdict).toBe('fail')
+    expect(unmet(s)).toEqual(['obj-dhcp'])
+  })
+})
+
 describe('пропавшая ретрансляция', () => {
   const at = '2026-09-10T08:40:00.000Z'
   const helpers = (s: S) => s().world.network.switches[1]!.vlanInterfaces.find(v => v.vlan === 20)!.helpers

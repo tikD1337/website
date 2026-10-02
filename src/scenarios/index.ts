@@ -7,6 +7,7 @@ import { dhcpRelayMissing } from './net-dhcp-relay-missing'
 import { hwDockFailed } from './hw-dock-failed'
 import { hwHeadsetWorn } from './hw-headset-worn'
 import { dnsStaleStatic } from './net-dns-stale-static'
+import { staticWrongGateway } from './net-static-wrong-gateway'
 import type { Scenario } from '../core/scenario/types'
 
 /**
@@ -25,6 +26,7 @@ export const SCENARIOS: Scenario[] = [
   hwDockFailed,
   hwHeadsetWorn,
   dnsStaleStatic,
+  staticWrongGateway,
 ]
 
 export function scenarioFor(id: string): Scenario {
